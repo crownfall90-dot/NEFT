@@ -1,0 +1,1011 @@
+{
+  "deposit": 1000.0,
+  "leverage_mt5": 500,
+  "leverage_crypto": 10,
+  "objective": "winrate_risk",
+  "risk_pct": 0.5,
+  "rr": 1.0,
+  "pullback_bars": 2,
+  "hss_session": [
+    16,
+    19
+  ],
+  "hss_24h": true,
+  "london": [
+    11,
+    16
+  ],
+  "ny": [
+    16,
+    23
+  ],
+  "news_filter": true,
+  "news_buffer_min": 5,
+  "max_daily_loss_pct": 5.0,
+  "max_drawdown_pct": 12.0,
+  "max_open_positions": 1,
+  "interval_sec": 5.0,
+  "venue": "both",
+  "exchange": "bybit",
+  "mt5_symbols": [
+    "NAS100",
+    "DJ30",
+    "GER40",
+    "EURUSD",
+    "EURUSD+",
+    "XAUUSD",
+    "XAUUSD+",
+    "GBPUSD",
+    "GBPUSD+"
+  ],
+  "crypto_symbols": [
+    "ETH/USDT:USDT",
+    "BNB/USDT:USDT",
+    "XRP/USDT:USDT",
+    "BCH/USDT:USDT",
+    "HYPE/USDT:USDT",
+    "SOL/USDT:USDT",
+    "DOGE/USDT:USDT",
+    "ZEC/USDT:USDT",
+    "SUI/USDT:USDT",
+    "AVAX/USDT:USDT",
+    "LINK/USDT:USDT",
+    "ADA/USDT:USDT",
+    "LTC/USDT:USDT",
+    "NEAR/USDT:USDT",
+    "APT/USDT:USDT",
+    "ARB/USDT:USDT",
+    "TRX/USDT:USDT",
+    "SEI/USDT:USDT",
+    "ATOM/USDT:USDT",
+    "INJ/USDT:USDT",
+    "UNI/USDT:USDT",
+    "1000PEPE/USDT:USDT"
+  ],
+  "crypto_routes": {
+    "ETH/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "BNB/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "XRP/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "BCH/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "HYPE/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "SOL/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "DOGE/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "ZEC/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "SUI/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "AVAX/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "LINK/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "ADA/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "LTC/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "NEAR/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "APT/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "ARB/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "TRX/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "SEI/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "ATOM/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "INJ/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "UNI/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ],
+    "1000PEPE/USDT:USDT": [
+      {
+        "strategy": "HSS",
+        "tf": "1m",
+        "session": null
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "5m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "London S/R",
+        "tf": "15m",
+        "session": [
+          16,
+          19
+        ]
+      },
+      {
+        "strategy": "Flow",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Squeeze",
+        "tf": "5m",
+        "session": null
+      },
+      {
+        "strategy": "Breakout",
+        "tf": "5m",
+        "session": null
+      }
+    ]
+  },
+  "scanner": {
+    "enabled": true,
+    "top_k": 4,
+    "min_score": 1.2
+  },
+  "allow_live": true,
+  "news": {
+    "gate": true,
+    "buffer_min": 5,
+    "high_only": true,
+    "block_usd_indices": true,
+    "block_usd_metals": true,
+    "block_usd_crypto": true,
+    "block_forex": true,
+    "telegram_briefing": true
+  },
+  "strategies": {
+    "hss": {
+      "enabled": true,
+      "rr": 1,
+      "tf": "M1",
+      "pullback": 2,
+      "session": [
+        16,
+        19
+      ],
+      "all_day": true,
+      "ema": 100
+    },
+    "london_sr": {
+      "enabled": true,
+      "min_rr": 1,
+      "tf": "M1",
+      "london": [
+        11,
+        16
+      ],
+      "ny": [
+        16,
+        23
+      ]
+    },
+    "breakout": {
+      "enabled": true,
+      "rr": 1.5,
+      "tf": "M5",
+      "box": [
+        10,
+        16
+      ],
+      "entry_from": 16,
+      "entry_until": 18
+    },
+    "martingale": {
+      "enabled": false,
+      "max_steps": 6,
+      "multiplier": 2.0,
+      "tp_pips": 10,
+      "sl_pips": 10
+    },
+    "squeeze": {
+      "enabled": true,
+      "min_rr": 2,
+      "tf": "M5",
+      "min_taps": 2
+    },
+    "session_flow": {
+      "enabled": true,
+      "rr": 1,
+      "tf": "5m",
+      "setups": "blend",
+      "gate_regime": true
+    },
+    "playbook": {
+      "enabled": true,
+      "tf": "5m"
+    }
+  },
+  "accounts": {
+    "paper": {
+      "deposit": 1000.0,
+      "risk_pct": 15.0,
+      "leverage_crypto": 5,
+      "max_daily_loss_pct": 10.0,
+      "max_drawdown_pct": 15.0,
+      "max_open_positions": 1,
+      "interval_sec": 5.0
+    },
+    "demo": {
+      "deposit": 1000.0,
+      "risk_pct": 0.5,
+      "leverage_crypto": 10,
+      "max_daily_loss_pct": 5.0,
+      "max_drawdown_pct": 12.0,
+      "max_open_positions": 1,
+      "interval_sec": 5.0
+    },
+    "live": {
+      "deposit": 1000.0,
+      "risk_pct": 1.0,
+      "leverage_crypto": 10,
+      "max_daily_loss_pct": 10.0,
+      "max_drawdown_pct": 15.0,
+      "max_open_positions": 1,
+      "interval_sec": 5.0
+    }
+  },
+  "account_mode": "demo"
+}

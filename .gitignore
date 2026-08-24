@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+logs/
+data/panel_token
+
+# Кэш исторических котировок и рантайм-снимки — регенерируются сами,
+# в git смысла нет (гигабайты, не код). Свежую историю тянут скрипты
+# scripts/*_data.py / crypto_data.py при первом запуске бэктеста.
+data/*.csv
+data/crypto/
+data/*_cache.json
+dashboard/crypto_chart.json
+
+# Локальные артефакты отладки браузера, не часть проекта.
+dashboard/_chrome-debug/
+.scratch/

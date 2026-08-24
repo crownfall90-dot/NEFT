@@ -1,0 +1,759 @@
+<title>Стенд мартингейла</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg:        #f2f2f7;
+  --surface:   #ffffff;
+  --surface-2: #f2f2f7;
+  --line:      rgba(60,60,67,.12);
+  --line-soft: rgba(60,60,67,.08);
+  --ink:       #1c1c1e;
+  --ink-2:     #636366;
+  --ink-3:     #8e8e93;
+
+  --s1: #0a84ff;
+  --s2: #ff9f0a;
+  --s3: #30d158;
+  --s4: #ffd60a;
+
+  --good:     #30d158;
+  --critical: #ff453a;
+  --warning:  #ff9f0a;
+  --alarm-bg: #fff2f1;
+  --warn-bg:  #fff8eb;
+
+  --grid: rgba(60,60,67,.08);
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 28px -12px rgba(0,0,0,.12), inset 0 .5px 0 rgba(255,255,255,.6);
+
+  --r: 14px;
+  --gap: clamp(18px, 2.4vw, 28px);
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg:        #000000;
+    --surface:   #1c1c1e;
+    --surface-2: #2c2c2e;
+    --line:      rgba(255,255,255,.10);
+    --line-soft: rgba(255,255,255,.06);
+    --ink:       #f5f5f7;
+    --ink-2:     #98989f;
+    --ink-3:     #8e8e93;
+
+    --s1: #0a84ff;
+    --s2: #ff9f0a;
+    --s3: #30d158;
+    --s4: #ffd60a;
+
+    --good:     #30d158;
+    --critical: #ff453a;
+    --warning:  #ff9f0a;
+    --alarm-bg: #2a1214;
+    --warn-bg:  #2a2008;
+
+    --grid: #1c1c1e;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 36px -14px rgba(0,0,0,.7), inset 0 .5px 0 rgba(255,255,255,.08);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:        #000000;
+  --surface:   #1c1c1e;
+  --surface-2: #2c2c2e;
+  --line:      rgba(255,255,255,.10);
+  --line-soft: rgba(255,255,255,.06);
+  --ink:       #f5f5f7;
+  --ink-2:     #98989f;
+  --ink-3:     #8e8e93;
+
+  --s1: #0a84ff;
+  --s2: #ff9f0a;
+  --s3: #30d158;
+  --s4: #ffd60a;
+
+  --good:     #30d158;
+  --critical: #ff453a;
+  --warning:  #ff9f0a;
+  --alarm-bg: #2a1214;
+  --warn-bg:  #2a2008;
+
+  --grid: #1c1c1e;
+  --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 36px -14px rgba(0,0,0,.7), inset 0 .5px 0 rgba(255,255,255,.08);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(22px, 4vw, 46px) clamp(14px, 3vw, 30px) 70px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* ─── типографика ─────────────────────────────────────────────── */
+h1, h2, h3 { font-family: var(--sans); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(30px, 4.6vw, 47px); font-weight: 700; letter-spacing: -.028em; line-height: 1.04; }
+h2 { font-size: clamp(17px, 2vw, 20px); font-weight: 600; letter-spacing: -.012em; }
+h3 { font-size: 14px; font-weight: 600; letter-spacing: -.005em; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 500;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3);
+}
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.dim  { color: var(--ink-2); }
+p { margin: 0; }
+
+/* ─── шапка ───────────────────────────────────────────────────── */
+.head { display: flex; flex-direction: column; gap: 12px; }
+.head-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 20px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.head-meta b { color: var(--ink); font-weight: 500; }
+.lede { max-width: 68ch; color: var(--ink-2); font-size: 16px; }
+
+/* ─── карточки ────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: clamp(16px, 2vw, 22px);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.card-head p { font-size: 13.5px; color: var(--ink-2); max-width: 62ch; }
+
+/* ─── вердикт ─────────────────────────────────────────────────── */
+.verdict {
+  display: grid; gap: 18px clamp(20px, 3vw, 34px);
+  grid-template-columns: minmax(0, 1fr);
+  border-left: 3px solid var(--critical);
+  background: var(--alarm-bg);
+  border-color: var(--line);
+  border-left-color: var(--critical);
+}
+@media (min-width: 760px) { .verdict { grid-template-columns: auto minmax(0, 1fr); align-items: center; } }
+.verdict-num { display: flex; flex-direction: column; gap: 2px; }
+.verdict-num .n {
+  font-family: var(--sans); font-weight: 700;
+  font-size: clamp(38px, 6vw, 60px); line-height: 1;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums;
+  color: var(--critical);
+}
+.verdict-num .l { font-size: 12px; color: var(--ink-2); font-family: var(--mono); letter-spacing: .05em; }
+.verdict-body { display: flex; flex-direction: column; gap: 9px; }
+.verdict-body p { font-size: 14.5px; color: var(--ink-2); max-width: 66ch; }
+.verdict-body strong { color: var(--ink); font-weight: 600; }
+
+/* ─── плитки ──────────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.tile { background: var(--surface); padding: 15px 16px 16px; display: flex; flex-direction: column; gap: 5px; }
+.tile .k { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.tile .v { font-family: var(--sans); font-weight: 600; font-size: clamp(21px, 2.5vw, 27px); letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tile .s { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.v.pos { color: var(--good); } .v.neg { color: var(--critical); } .v.warn { color: var(--warning); }
+
+/* ─── переключатель конфигураций ──────────────────────────────── */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit; font-size: 13px;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 13px 7px 11px;
+  background: var(--surface-2); color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: 999px;
+  cursor: pointer; transition: background .14s, color .14s, border-color .14s;
+}
+.chip:hover { border-color: var(--ink-3); color: var(--ink); }
+.chip:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px var(--surface); }
+.chip[aria-pressed="true"] .dot { box-shadow: 0 0 0 2px var(--ink); }
+.chip .pct { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; opacity: .75; }
+
+/* ─── графики ─────────────────────────────────────────────────── */
+.chart-box { position: relative; width: 100%; }
+svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
+.grid-line { stroke: var(--grid); stroke-width: 1; }
+.axis-text { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ref-line { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
+.crosshair { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+
+.tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 7px; box-shadow: var(--shadow);
+  padding: 8px 10px; font-size: 12.5px; min-width: 132px;
+  opacity: 0; transform: translate(-50%, -118%); transition: opacity .1s;
+}
+.tip.on { opacity: 1; }
+.tip .tt { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: .04em; }
+.tip .tv { font-family: var(--sans); font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.tip .tr { display: flex; justify-content: space-between; gap: 14px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 12px; }
+.tip .tr span:first-child { color: var(--ink-2); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--ink-2); }
+.legend i { display: inline-flex; align-items: center; gap: 7px; font-style: normal; }
+.legend .sw { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+
+/* ─── таблица ─────────────────────────────────────────────────── */
+.tbl-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 460px; }
+th, td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink-3); font-weight: 500; border-bottom-color: var(--line); }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tr.blocked td { color: var(--ink-3); }
+tr.blocked td:first-child { color: var(--critical); }
+tbody tr:last-child td { border-bottom: none; }
+
+.flag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+}
+.flag.stop { background: var(--alarm-bg); color: var(--critical); }
+.flag.ok   { background: var(--surface-2); color: var(--ink-2); }
+
+/* ─── двухколоночная секция ───────────────────────────────────── */
+.cols { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .cols { grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); } }
+
+.notes { display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; color: var(--ink-2); }
+.notes b { color: var(--ink); font-weight: 600; }
+
+footer { border-top: 1px solid var(--line); padding-top: 18px; color: var(--ink-3); font-size: 12.5px; display: flex; flex-direction: column; gap: 7px; }
+footer code { font-family: var(--mono); color: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <span class="eyebrow">NEFT · стенд стратегий</span>
+    <h1>Мартингейл на EURUSD&#8202;+</h1>
+    <p class="lede" id="lede"></p>
+    <div class="head-meta" id="meta"></div>
+  </header>
+
+  <section class="card verdict">
+    <div class="verdict-num">
+      <span class="n" id="v-num">—</span>
+      <span class="l" id="v-lbl">максимальная просадка</span>
+    </div>
+    <div class="verdict-body" id="v-body"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Кривая депозита</h2>
+      <p>Выберите конфигурацию — плитки и график пересчитаются. Все прогоны на одних и тех же барах.</p>
+    </div>
+    <div class="chips" id="chips" role="group" aria-label="Конфигурация"></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="chart-box">
+      <svg class="chart" id="eq" viewBox="0 0 940 320" preserveAspectRatio="none" role="img" aria-labelledby="eq-t"></svg>
+      <title id="eq-t">Кривая депозита по выбранной конфигурации</title>
+      <div class="tip" id="eq-tip"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Где правило 0.5–3&nbsp;% обрывает серию</h2>
+      <p>Мартингейл удваивает лот после каждого убытка. Риск растёт как 2ⁿ и упирается в потолок на третьем шаге.</p>
+    </div>
+    <div class="cols">
+      <div class="chart-box">
+        <svg class="chart" id="ladder" viewBox="0 0 460 300" role="img" aria-labelledby="l-t"></svg>
+        <title id="l-t">Риск на сделку по шагам серии против потолка 3%</title>
+        <div class="tip" id="ladder-tip"></div>
+      </div>
+      <div class="tbl-scroll">
+        <table>
+          <thead><tr><th>Шаг</th><th>Лот</th><th>Убыток</th><th>Риск</th><th>Статус</th></tr></thead>
+          <tbody id="ladder-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="notes" id="ladder-notes"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Итог по уровню риска</h2>
+      <p>Один и тот же код, одни и те же данные — меняется только процент риска на сделку внутри вашего коридора.</p>
+    </div>
+    <div class="chart-box">
+      <svg class="chart" id="risk" viewBox="0 0 940 300" role="img" aria-labelledby="r-t"></svg>
+      <title id="r-t">Доходность и просадка по уровню риска на сделку</title>
+      <div class="tip" id="risk-tip"></div>
+    </div>
+    <div class="legend">
+      <i><span class="sw" style="background:var(--good)"></span>прибыль</i>
+      <i><span class="sw" style="background:var(--critical)"></span>убыток</i>
+      <i><span class="sw" style="background:var(--ink-3)"></span>максимальная просадка</i>
+    </div>
+    <div class="notes" id="risk-notes"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Анатомия сделок</h2>
+      <p>Основная конфигурация: риск 1&nbsp;%, потолок 3&nbsp;%.</p>
+    </div>
+    <div class="cols">
+      <div class="chart-box">
+        <svg class="chart" id="streak" viewBox="0 0 460 260" role="img" aria-labelledby="s-t"></svg>
+        <title id="s-t">Распределение длины серий убытков</title>
+        <div class="tip" id="streak-tip"></div>
+      </div>
+      <div class="notes" id="trade-notes"></div>
+    </div>
+  </section>
+
+  <footer>
+    <p id="foot-1"></p>
+    <p>Пессимистичные допущения движка: вход по цене закрытия бара плюс спред; если в одном баре задеты и стоп, и тейк — засчитан стоп; маржа резервируется по цене входа; стоп-аут проверяется на каждом баре.</p>
+    <p>Пересобрать: <code>python scripts/sweep.py &amp;&amp; python scripts/build_dashboard.py</code></p>
+  </footer>
+</div>
+
+<script type="application/json" id="data">/*__DATA__*/</script>
+<script>
+(() => {
+  "use strict";
+  const D = JSON.parse(document.getElementById("data").textContent);
+  const $ = (s) => document.querySelector(s);
+  const el = (t, a = {}, kids = []) => {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", t);
+    for (const k in a) n.setAttribute(k, a[k]);
+    kids.forEach(c => n.appendChild(c));
+    return n;
+  };
+  const SERIES = ["--s1", "--s2", "--s3", "--s4"];
+  const cssv = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const money = (v) => "$" + v.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const money2 = (v) => "$" + v.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const pct = (v, d = 2) => (v > 0 ? "+" : "") + v.toFixed(d) + "%";
+  const shortDate = (s) => { const [y, m, dd] = s.slice(0, 10).split("-"); return dd + "." + m; };
+
+  /* ── шапка ─────────────────────────────────────────────────── */
+  const [from, to] = D.period;
+  $("#lede").textContent =
+    `Стратегия удваивает лот после каждого убытка. Стенд проверяет, что от неё остаётся ` +
+    `под жёстким правилом риска 0.5–3 % от депозита — и во что она превращается без него.`;
+  $("#meta").innerHTML =
+    `<span><b>${D.symbol}</b> · ${D.timeframe}</span>` +
+    `<span><b>${D.bars.toLocaleString("ru-RU")}</b> баров</span>` +
+    `<span>${from.slice(0, 10)} — ${to.slice(0, 10)}</span>` +
+    `<span>спред <b>${D.spread_points}</b> пункт</span>` +
+    `<span>плечо <b>1:${D.leverage}</b></span>`;
+
+  /* ── вердикт ───────────────────────────────────────────────── */
+  const main = D.variants.find(v => v.label.startsWith("Риск 1%")) || D.variants[2];
+  const noLimit = D.variants.find(v => v.label.includes("без риск")) || D.variants[1];
+  const flat = D.variants[0];
+  const rl = D.risk_levels;
+  const best = rl.reduce((a, b) => (b.return_pct > a.return_pct ? b : a));
+  const worst = rl.reduce((a, b) => (b.return_pct < a.return_pct ? b : a));
+
+  $("#v-num").textContent = main.metrics.max_drawdown_pct.toFixed(1) + "%";
+  $("#v-body").innerHTML =
+    `<p>За ${D.bars.toLocaleString("ru-RU")} баров мартингейл под вашим правилом дал <strong>${pct(main.metrics.return_pct)}</strong>, ` +
+    `но провёл депозит через просадку <strong>${main.metrics.max_drawdown_pct.toFixed(1)}&nbsp;%</strong> и серию из ` +
+    `<strong>${main.metrics.max_loss_streak}</strong> убытков подряд. Фиксированный лот на тех же данных дал ` +
+    `${pct(flat.metrics.return_pct)} при просадке всего ${flat.metrics.max_drawdown_pct.toFixed(1)}&nbsp;%.</p>` +
+    `<p>Главное — <strong>результат неустойчив</strong>. Сдвиг риска с ${best.risk_pct}&nbsp;% на ${worst.risk_pct}&nbsp;% ` +
+    `переворачивает итог с <strong>${pct(best.return_pct)}</strong> на <strong>${pct(worst.return_pct)}</strong>. ` +
+    `Ни один параметр не менялся, кроме размера позиции. Profit factor основного прогона — ` +
+    `<strong>${main.metrics.profit_factor.toFixed(3)}</strong>: прибыль держится на тонкой грани над случайностью.</p>`;
+
+  /* ── переключатель и плитки ────────────────────────────────── */
+  let active = D.variants.indexOf(main);
+  const chips = $("#chips");
+  D.variants.forEach((v, i) => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(i === active));
+    b.innerHTML = `<span class="dot" style="background:var(${SERIES[i]})"></span>` +
+      `${v.label}<span class="pct">${pct(v.metrics.return_pct, 1)}</span>`;
+    b.addEventListener("click", () => { active = i; sync(); });
+    chips.appendChild(b);
+  });
+
+  function tiles(v) {
+    const m = v.metrics;
+    const sign = (x) => (x > 0 ? "pos" : x < 0 ? "neg" : "");
+    const rows = [
+      ["Итог", money2(m.end_balance), `старт ${money(m.start_balance)}`, sign(m.net_profit)],
+      ["Доход", pct(m.return_pct), money2(m.net_profit), sign(m.net_profit)],
+      ["Просадка", m.max_drawdown_pct.toFixed(1) + "%", money2(m.max_drawdown_abs), m.max_drawdown_pct > 20 ? "neg" : "warn"],
+      ["Сделок", String(m.trades), `${m.wins} / ${m.losses}`, ""],
+      ["Винрейт", m.win_rate.toFixed(1) + "%", "порог 50 %", ""],
+      ["Profit factor", m.profit_factor.toFixed(3), "порог 1.000", m.profit_factor >= 1 ? "pos" : "neg"],
+      ["Матожидание", (m.expectancy > 0 ? "+" : "") + m.expectancy.toFixed(3), "на сделку, $", sign(m.expectancy)],
+      ["Серия убытков", String(m.max_loss_streak), `макс. шаг ${v.max_step}`, m.max_loss_streak > 5 ? "neg" : ""],
+    ];
+    $("#tiles").innerHTML = rows.map(([k, val, s, cls]) =>
+      `<div class="tile"><span class="k">${k}</span>` +
+      `<span class="v ${cls}">${val}</span><span class="s">${s}</span></div>`).join("");
+  }
+
+  /* ── кривая депозита ───────────────────────────────────────── */
+  const EQ = { w: 940, h: 320, l: 54, r: 16, t: 14, b: 26 };
+  function drawEquity(v, idx) {
+    const svg = $("#eq"), tip = $("#eq-tip");
+    svg.innerHTML = "";
+    const pts = v.equity;
+    const iw = EQ.w - EQ.l - EQ.r, ih = EQ.h - EQ.t - EQ.b;
+    const vals = pts.map(p => p.v);
+    const start = v.metrics.start_balance;
+    let lo = Math.min(...vals, start), hi = Math.max(...vals, start);
+    const pad = (hi - lo) * 0.12 || 10;
+    lo -= pad; hi += pad;
+    const X = (i) => EQ.l + (i / (pts.length - 1)) * iw;
+    const Y = (val) => EQ.t + ih - ((val - lo) / (hi - lo)) * ih;
+
+    const g = el("g");
+    // сетка и подписи оси значений
+    const ticks = 5;
+    for (let i = 0; i <= ticks; i++) {
+      const val = lo + (hi - lo) * (i / ticks), y = Y(val);
+      g.appendChild(el("line", { x1: EQ.l, x2: EQ.w - EQ.r, y1: y, y2: y, class: "grid-line" }));
+      g.appendChild(el("text", { x: EQ.l - 9, y: y + 3.5, class: "axis-text", "text-anchor": "end" }))
+        .textContent = money(Math.round(val));
+    }
+    // линия старта — точка отсчёта прибыли
+    g.appendChild(el("line", { x1: EQ.l, x2: EQ.w - EQ.r, y1: Y(start), y2: Y(start), class: "ref-line" }));
+
+    const color = cssv(SERIES[idx]);
+    const line = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+    const area = `${line}L${X(pts.length - 1).toFixed(1)},${Y(lo)}L${EQ.l},${Y(lo)}Z`;
+
+    const gid = "gr" + idx;
+    const defs = el("defs");
+    const lg = el("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 });
+    lg.appendChild(el("stop", { offset: "0%", "stop-color": color, "stop-opacity": .22 }));
+    lg.appendChild(el("stop", { offset: "100%", "stop-color": color, "stop-opacity": 0 }));
+    defs.appendChild(lg); g.appendChild(defs);
+
+    g.appendChild(el("path", { d: area, fill: `url(#${gid})`, stroke: "none" }));
+    g.appendChild(el("path", { d: line, fill: "none", stroke: color, "stroke-width": 2,
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+    // подписи времени
+    [0, Math.floor(pts.length / 2), pts.length - 1].forEach((i, k) => {
+      g.appendChild(el("text", { x: X(i), y: EQ.h - 6, class: "axis-text",
+        "text-anchor": k === 0 ? "start" : k === 2 ? "end" : "middle" }))
+        .textContent = shortDate(pts[i].t);
+    });
+
+    // акцент на последней точке
+    const last = pts[pts.length - 1];
+    g.appendChild(el("circle", { cx: X(pts.length - 1), cy: Y(last.v), r: 4,
+      fill: color, stroke: cssv("--surface"), "stroke-width": 2 }));
+
+    const ch = el("line", { class: "crosshair", y1: EQ.t, y2: EQ.t + ih, x1: 0, x2: 0, opacity: 0 });
+    const dot = el("circle", { r: 4.5, fill: color, stroke: cssv("--surface"), "stroke-width": 2, opacity: 0 });
+    g.appendChild(ch); g.appendChild(dot);
+    svg.appendChild(g);
+
+    const hit = el("rect", { x: EQ.l, y: EQ.t, width: iw, height: ih, fill: "transparent" });
+    svg.appendChild(hit);
+
+    const box = svg.parentElement;
+    function move(e) {
+      const rect = svg.getBoundingClientRect();
+      const px = (e.clientX - rect.left) / rect.width * EQ.w;
+      let i = Math.round((px - EQ.l) / iw * (pts.length - 1));
+      i = Math.max(0, Math.min(pts.length - 1, i));
+      const p = pts[i], x = X(i), y = Y(p.v);
+      ch.setAttribute("x1", x); ch.setAttribute("x2", x); ch.setAttribute("opacity", .8);
+      dot.setAttribute("cx", x); dot.setAttribute("cy", y); dot.setAttribute("opacity", 1);
+      const delta = (p.v / start - 1) * 100;
+      tip.innerHTML = `<div class="tt">${p.t.slice(0, 16)}</div>` +
+        `<div class="tv">${money2(p.v)}</div>` +
+        `<div class="tr"><span>от старта</span><span style="color:${delta >= 0 ? cssv("--good") : cssv("--critical")}">${pct(delta)}</span></div>`;
+      tip.classList.add("on");
+      tip.style.left = (x / EQ.w * rect.width) + "px";
+      tip.style.top = (y / EQ.h * rect.height) + "px";
+    }
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerleave", () => {
+      tip.classList.remove("on"); ch.setAttribute("opacity", 0); dot.setAttribute("opacity", 0);
+    });
+  }
+
+  function sync() {
+    [...chips.children].forEach((c, i) => c.setAttribute("aria-pressed", String(i === active)));
+    const v = D.variants[active];
+    tiles(v);
+    drawEquity(v, active);
+  }
+
+  /* ── лестница мартингейла ──────────────────────────────────── */
+  function drawLadder() {
+    const svg = $("#ladder"), tip = $("#ladder-tip");
+    svg.innerHTML = "";
+    const W = 460, H = 300, L = 34, R = 14, T = 16, B = 30;
+    const rows = D.ladder.slice(0, 7);
+    const iw = W - L - R, ih = H - T - B;
+    const cap = D.main.params.max_risk_pct;
+    const hi = Math.max(...rows.map(r => r.risk_pct));
+    const Y = (v) => T + ih - (v / hi) * ih;
+    const bw = iw / rows.length * 0.62;
+    const g = el("g");
+
+    for (let i = 0; i <= 4; i++) {
+      const val = hi * i / 4, y = Y(val);
+      g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y, class: "grid-line" }));
+      g.appendChild(el("text", { x: L - 7, y: y + 3.5, class: "axis-text", "text-anchor": "end" }))
+        .textContent = Math.round(val) + "%";
+    }
+
+    const good = cssv("--good"), crit = cssv("--critical"), surf = cssv("--surface");
+    rows.forEach((r, i) => {
+      const cx = L + (i + .5) * (iw / rows.length);
+      const y = Y(r.risk_pct), h = Math.max(2, T + ih - y);
+      const over = r.risk_pct > cap;
+      const bar = el("rect", {
+        x: cx - bw / 2, y, width: bw, height: h,
+        rx: 4, ry: 4, fill: over ? crit : good,
+        opacity: over ? .32 : 1,
+        stroke: surf, "stroke-width": 2,
+      });
+      // прямоугольник со скруглением только сверху: низ прижат к базовой линии
+      bar.setAttribute("d", "");
+      g.appendChild(bar);
+      g.appendChild(el("text", { x: cx, y: H - 9, class: "axis-text", "text-anchor": "middle" }))
+        .textContent = r.step;
+
+      bar.style.cursor = "pointer";
+      bar.addEventListener("pointerenter", (e) => {
+        const rect = svg.getBoundingClientRect();
+        tip.innerHTML = `<div class="tt">ШАГ ${r.step} · ЛОТ ${r.lot.toFixed(2)}</div>` +
+          `<div class="tv" style="color:${over ? crit : good}">${r.risk_pct.toFixed(1)}%</div>` +
+          `<div class="tr"><span>убыток</span><span>${money2(r.loss)}</span></div>` +
+          `<div class="tr"><span>статус</span><span>${over ? "отказ" : "пропуск"}</span></div>`;
+        tip.classList.add("on");
+        tip.style.left = (cx / W * rect.width) + "px";
+        tip.style.top = (y / H * rect.height) + "px";
+      });
+      bar.addEventListener("pointerleave", () => tip.classList.remove("on"));
+    });
+
+    // потолок риска — то, ради чего график существует
+    const yc = Y(cap);
+    g.appendChild(el("line", { x1: L, x2: W - R, y1: yc, y2: yc,
+      stroke: crit, "stroke-width": 2, "stroke-dasharray": "5 3" }));
+    const lbl = el("text", { x: W - R, y: yc - 7, class: "axis-text", "text-anchor": "end",
+      fill: crit, "font-weight": 600 });
+    lbl.textContent = `потолок ${cap}%`;
+    g.appendChild(lbl);
+    g.appendChild(el("text", { x: L + iw / 2, y: H - 9, class: "axis-text",
+      "text-anchor": "middle", opacity: 0 }));
+    svg.appendChild(g);
+  }
+
+  function ladderTable() {
+    const cap = D.main.params.max_risk_pct;
+    $("#ladder-tbody").innerHTML = D.ladder.slice(0, 7).map(r => {
+      const over = r.risk_pct > cap;
+      return `<tr class="${over ? "blocked" : ""}">` +
+        `<td class="num">${r.step}</td>` +
+        `<td class="num">${r.lot.toFixed(2)}</td>` +
+        `<td class="num">${money2(r.loss)}</td>` +
+        `<td class="num">${r.risk_pct.toFixed(1)}%</td>` +
+        `<td><span class="flag ${over ? "stop" : "ok"}">${over ? "✕ отказ" : "пропуск"}</span></td></tr>`;
+    }).join("");
+  }
+
+  /* ── свип по риску ─────────────────────────────────────────── */
+  function drawRisk() {
+    const svg = $("#risk"), tip = $("#risk-tip");
+    svg.innerHTML = "";
+    const W = 940, H = 300, L = 52, R = 20, T = 18, B = 40;
+    const iw = W - L - R, ih = H - T - B;
+    const vals = rl.flatMap(r => [r.return_pct, -r.dd_pct]);
+    let hi = Math.max(...vals, 5), lo = Math.min(...vals, -5);
+    const padv = (hi - lo) * .1; hi += padv; lo -= padv;
+    const Y = (v) => T + ih - ((v - lo) / (hi - lo)) * ih;
+    const slot = iw / rl.length, bw = slot * 0.30;
+    const g = el("g");
+
+    for (let i = 0; i <= 5; i++) {
+      const val = lo + (hi - lo) * i / 5, y = Y(val);
+      g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y, class: "grid-line" }));
+      g.appendChild(el("text", { x: L - 9, y: y + 3.5, class: "axis-text", "text-anchor": "end" }))
+        .textContent = Math.round(val) + "%";
+    }
+    const zero = Y(0);
+    g.appendChild(el("line", { x1: L, x2: W - R, y1: zero, y2: zero,
+      stroke: cssv("--ink-3"), "stroke-width": 1.5 }));
+
+    const good = cssv("--good"), crit = cssv("--critical"), mid = cssv("--ink-3"), surf = cssv("--surface");
+    rl.forEach((r, i) => {
+      const cx = L + (i + .5) * slot;
+      const pos = r.return_pct >= 0;
+      const yR = Y(Math.max(0, r.return_pct)), hR = Math.abs(Y(r.return_pct) - zero);
+      const yD = zero, hD = Math.abs(Y(-r.dd_pct) - zero);
+
+      const barR = el("rect", { x: cx - bw - 2, y: yR, width: bw, height: Math.max(2, hR),
+        rx: 4, ry: 4, fill: pos ? good : crit, stroke: surf, "stroke-width": 2 });
+      const barD = el("rect", { x: cx + 2, y: yD, width: bw, height: Math.max(2, hD),
+        rx: 4, ry: 4, fill: mid, opacity: .5, stroke: surf, "stroke-width": 2 });
+      g.appendChild(barR); g.appendChild(barD);
+
+      // значение доходности подписано напрямую — знак несёт смысл, не только цвет
+      const t = el("text", { x: cx - bw / 2 - 2, y: pos ? yR - 7 : yR + hR + 14,
+        class: "axis-text", "text-anchor": "middle", fill: pos ? good : crit, "font-weight": 600 });
+      t.textContent = pct(r.return_pct, 1);
+      g.appendChild(t);
+
+      g.appendChild(el("text", { x: cx, y: H - 20, class: "axis-text", "text-anchor": "middle" }))
+        .textContent = r.risk_pct.toFixed(1) + "%";
+
+      [[barR, "доходность"], [barD, "просадка"]].forEach(([bar]) => {
+        bar.style.cursor = "pointer";
+        bar.addEventListener("pointerenter", () => {
+          const rect = svg.getBoundingClientRect();
+          tip.innerHTML = `<div class="tt">РИСК ${r.risk_pct.toFixed(1)}% НА СДЕЛКУ</div>` +
+            `<div class="tv" style="color:${pos ? good : crit}">${pct(r.return_pct)}</div>` +
+            `<div class="tr"><span>итог</span><span>${money2(r.end)}</span></div>` +
+            `<div class="tr"><span>просадка</span><span>${r.dd_pct.toFixed(1)}%</span></div>` +
+            `<div class="tr"><span>сделок</span><span>${r.trades}</span></div>` +
+            `<div class="tr"><span>отказов риска</span><span>${r.blocked}</span></div>`;
+          tip.classList.add("on");
+          tip.style.left = (cx / W * rect.width) + "px";
+          tip.style.top = (Math.min(yR, zero) / H * rect.height) + "px";
+        });
+        bar.addEventListener("pointerleave", () => tip.classList.remove("on"));
+      });
+    });
+    g.appendChild(el("text", { x: L + iw / 2, y: H - 4, class: "axis-text", "text-anchor": "middle" }))
+      .textContent = "риск на сделку, % депозита";
+    svg.appendChild(g);
+  }
+
+  /* ── распределение серий убытков ───────────────────────────── */
+  function drawStreaks() {
+    const svg = $("#streak"), tip = $("#streak-tip");
+    svg.innerHTML = "";
+    const trades = D.main.trades;
+    const counts = new Map();
+    let run = 0;
+    for (const t of trades) {
+      if (t.pnl <= 0) run++;
+      else { if (run) counts.set(run, (counts.get(run) || 0) + 1); run = 0; }
+    }
+    if (run) counts.set(run, (counts.get(run) || 0) + 1);
+    const keys = [...counts.keys()].sort((a, b) => a - b);
+
+    const W = 460, H = 260, L = 34, R = 14, T = 16, B = 34;
+    const iw = W - L - R, ih = H - T - B;
+    const hi = Math.max(...keys.map(k => counts.get(k)));
+    const Y = (v) => T + ih - (v / hi) * ih;
+    const slot = iw / keys.length, bw = slot * .58;
+    const g = el("g");
+
+    for (let i = 0; i <= 4; i++) {
+      const val = hi * i / 4, y = Y(val);
+      g.appendChild(el("line", { x1: L, x2: W - R, y1: y, y2: y, class: "grid-line" }));
+      g.appendChild(el("text", { x: L - 7, y: y + 3.5, class: "axis-text", "text-anchor": "end" }))
+        .textContent = Math.round(val);
+    }
+    const c = cssv("--s1"), surf = cssv("--surface"), crit = cssv("--critical");
+    const cap = D.main.params.max_risk_pct;
+    keys.forEach((k, i) => {
+      const n = counts.get(k), cx = L + (i + .5) * slot;
+      const y = Y(n), h = Math.max(2, T + ih - y);
+      // серия длиннее 2 уже упирается в потолок риска — красим тревожным
+      const over = k >= 3;
+      const bar = el("rect", { x: cx - bw / 2, y, width: bw, height: h, rx: 4, ry: 4,
+        fill: over ? crit : c, opacity: over ? .8 : 1, stroke: surf, "stroke-width": 2 });
+      g.appendChild(bar);
+      g.appendChild(el("text", { x: cx, y: H - 16, class: "axis-text", "text-anchor": "middle" }))
+        .textContent = k;
+      bar.style.cursor = "pointer";
+      bar.addEventListener("pointerenter", () => {
+        const rect = svg.getBoundingClientRect();
+        tip.innerHTML = `<div class="tt">СЕРИЯ ИЗ ${k} УБЫТКОВ</div><div class="tv">${n}</div>` +
+          `<div class="tr"><span>доля</span><span>${(n / keys.reduce((s, kk) => s + counts.get(kk), 0) * 100).toFixed(1)}%</span></div>` +
+          `<div class="tr"><span>риск-потолок</span><span>${over ? "сработал" : "нет"}</span></div>`;
+        tip.classList.add("on");
+        tip.style.left = (cx / W * rect.width) + "px";
+        tip.style.top = (y / H * rect.height) + "px";
+      });
+      bar.addEventListener("pointerleave", () => tip.classList.remove("on"));
+    });
+    g.appendChild(el("text", { x: L + iw / 2, y: H - 3, class: "axis-text", "text-anchor": "middle" }))
+      .textContent = "длина серии убытков подряд";
+    svg.appendChild(g);
+    return { counts, keys, cap };
+  }
+
+  /* ── тексты ────────────────────────────────────────────────── */
+  const capStep = D.ladder.find(r => r.risk_pct > D.main.params.max_risk_pct);
+  $("#ladder-notes").innerHTML =
+    `<p><b>Потолок срабатывает на шаге ${capStep.step}.</b> Лот ${capStep.lot.toFixed(2)} означает риск ` +
+    `${capStep.risk_pct.toFixed(0)}&nbsp;% — вдвое выше вашего предела, поэтому риск-слой не пропускает ордер ` +
+    `и серия обрывается с зафиксированным убытком.</p>` +
+    `<p>За прогон это случилось <b>${D.main.blocked_by_risk} раз</b>, а максимальный достигнутый шаг — ` +
+    `<b>${D.main.max_step}</b>. Правило 0.5–3&nbsp;% превращает мартингейл в почти фиксированный лот: ` +
+    `удвоиться он успевает лишь дважды.</p>`;
+
+  $("#risk-notes").innerHTML =
+    `<p>Между ${best.risk_pct}&nbsp;% и ${worst.risk_pct}&nbsp;% нет закономерности — есть разброс. ` +
+    `Это отпечаток мартингейла: итог решает не качество входов, а то, попала ли длинная серия убытков ` +
+    `на участок, где депозит ещё позволял удваиваться.</p>` +
+    `<p><b>Подгонка под историю здесь особенно опасна.</b> Выбрать ${best.risk_pct}&nbsp;% потому, что на этих ` +
+    `данных вышло ${pct(best.return_pct, 1)}, значит выбрать число, которое на следующих 50&nbsp;000 барах ` +
+    `не значит ничего.</p>`;
+
+  const m = D.main.metrics;
+  $("#trade-notes").innerHTML =
+    `<p><b>Винрейт ${m.win_rate.toFixed(1)}&nbsp;% при убыточном матожидании до сайзинга.</b> ` +
+    `Выигрышей больше половины, но средний выигрыш ${money2(m.avg_win)} меньше среднего убытка ` +
+    `${money2(Math.abs(m.avg_loss))} — разницу забирает спред, по одному пункту с каждой сделки.</p>` +
+    `<p>Самая длинная серия — <b>${m.max_loss_streak} убытков подряд</b>. Классический мартингейл потребовал бы ` +
+    `на её закрытии лот в ${Math.pow(2, m.max_loss_streak).toFixed(0)}&nbsp;раз больше базового, то есть риск ` +
+    `${(Math.pow(2, m.max_loss_streak) * 1).toFixed(0)}&nbsp;% депозита. Это не просадка, это маржин-колл.</p>` +
+    `<p>Красным отмечены серии длиной от 3 — те, на которых ваш риск-потолок вмешивался и запрещал следующее удвоение.</p>`;
+
+  $("#foot-1").textContent =
+    `Данные: ${D.symbol} ${D.timeframe}, ${D.bars.toLocaleString("ru-RU")} баров из терминала MetaTrader 5 ` +
+    `(Bybit CFD), период ${from.slice(0, 10)} — ${to.slice(0, 10)}. Спред ${D.spread_points} пункт, ` +
+    `плечо 1:${D.leverage}, стоп и тейк по 10 пунктов.`;
+
+  /* ── старт и перерисовка при смене темы ────────────────────── */
+  function renderAll() { sync(); drawLadder(); ladderTable(); drawRisk(); drawStreaks(); }
+  renderAll();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+  new MutationObserver(renderAll).observe(document.documentElement,
+    { attributes: true, attributeFilter: ["data-theme"] });
+})();
+</script>

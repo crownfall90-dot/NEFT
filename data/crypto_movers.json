@@ -1,0 +1,177 @@
+{
+  "volume": [
+    {
+      "symbol": "ETHUSDT",
+      "coin": "ETH",
+      "turnover24h": 3091682381.9182,
+      "pct24h": 1.72,
+      "last": 2456.9
+    },
+    {
+      "symbol": "XRPUSDT",
+      "coin": "XRP",
+      "turnover24h": 1021449452.8598,
+      "pct24h": 3.35,
+      "last": 1.5198
+    },
+    {
+      "symbol": "SOLUSDT",
+      "coin": "SOL",
+      "turnover24h": 799430196.99,
+      "pct24h": 1.81,
+      "last": 95.53
+    },
+    {
+      "symbol": "ZECUSDT",
+      "coin": "ZEC",
+      "turnover24h": 517659122.1642,
+      "pct24h": 6.37,
+      "last": 855.71
+    },
+    {
+      "symbol": "HYPEUSDT",
+      "coin": "HYPE",
+      "turnover24h": 412385422.0393,
+      "pct24h": 4.26,
+      "last": 82.64
+    },
+    {
+      "symbol": "TRUMPUSDT",
+      "coin": "TRUMP",
+      "turnover24h": 304237435.7543,
+      "pct24h": 15.22,
+      "last": 2.695
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "coin": "DOGE",
+      "turnover24h": 255866582.2144,
+      "pct24h": 1.06,
+      "last": 0.0931
+    },
+    {
+      "symbol": "PUMPFUNUSDT",
+      "coin": "PUMPFUN",
+      "turnover24h": 163280522.8418,
+      "pct24h": 5.0,
+      "last": 0.005329
+    }
+  ],
+  "gainers": [
+    {
+      "symbol": "SPKUSDT",
+      "coin": "SPK",
+      "turnover24h": 18777818.6276,
+      "pct24h": 26.39,
+      "last": 0.02289
+    },
+    {
+      "symbol": "MORPHOUSDT",
+      "coin": "MORPHO",
+      "turnover24h": 11929642.9555,
+      "pct24h": 24.92,
+      "last": 2.852
+    },
+    {
+      "symbol": "GRASSUSDT",
+      "coin": "GRASS",
+      "turnover24h": 11398960.6439,
+      "pct24h": 20.79,
+      "last": 0.3625
+    },
+    {
+      "symbol": "CASHCATUSDT",
+      "coin": "CASHCAT",
+      "turnover24h": 8320171.0546,
+      "pct24h": 20.36,
+      "last": 0.1504
+    },
+    {
+      "symbol": "PENGUUSDT",
+      "coin": "PENGU",
+      "turnover24h": 74177724.6019,
+      "pct24h": 17.25,
+      "last": 0.009918
+    },
+    {
+      "symbol": "UAIUSDT",
+      "coin": "UAI",
+      "turnover24h": 8647912.0208,
+      "pct24h": 17.05,
+      "last": 0.2814
+    },
+    {
+      "symbol": "AGIUSDT",
+      "coin": "AGI",
+      "turnover24h": 5361266.9173,
+      "pct24h": 16.21,
+      "last": 0.004351
+    },
+    {
+      "symbol": "TRUMPUSDT",
+      "coin": "TRUMP",
+      "turnover24h": 304237435.7543,
+      "pct24h": 15.22,
+      "last": 2.695
+    }
+  ],
+  "losers": [
+    {
+      "symbol": "MAGMAUSDT",
+      "coin": "MAGMA",
+      "turnover24h": 5389053.816,
+      "pct24h": -10.46,
+      "last": 0.2329
+    },
+    {
+      "symbol": "BEATUSDT",
+      "coin": "BEAT",
+      "turnover24h": 24130299.5991,
+      "pct24h": -5.93,
+      "last": 0.13097
+    },
+    {
+      "symbol": "AKEUSDT",
+      "coin": "AKE",
+      "turnover24h": 7247931.3943,
+      "pct24h": -3.23,
+      "last": 0.0085
+    },
+    {
+      "symbol": "ACEUSDT",
+      "coin": "ACE",
+      "turnover24h": 18185630.9417,
+      "pct24h": -1.84,
+      "last": 0.23418
+    },
+    {
+      "symbol": "BTWUSDT",
+      "coin": "BTW",
+      "turnover24h": 12614390.0019,
+      "pct24h": -1.68,
+      "last": 0.43776
+    },
+    {
+      "symbol": "XMRUSDT",
+      "coin": "XMR",
+      "turnover24h": 26175094.2935,
+      "pct24h": -1.58,
+      "last": 428.94
+    },
+    {
+      "symbol": "CRVUSDT",
+      "coin": "CRV",
+      "turnover24h": 14609960.0091,
+      "pct24h": -1.53,
+      "last": 0.3336
+    },
+    {
+      "symbol": "FARTCOINUSDT",
+      "coin": "FARTCOIN",
+      "turnover24h": 50429229.7397,
+      "pct24h": -1.51,
+      "last": 0.18003
+    }
+  ],
+  "universe_size": 105
+}

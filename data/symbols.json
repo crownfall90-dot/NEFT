@@ -1,0 +1,242 @@
+{
+ "EURUSD+": {
+  "name": "EURUSD+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 0
+ },
+ "NAS100": {
+  "name": "NAS100",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 80
+ },
+ "DJ30": {
+  "name": "DJ30",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 100
+ },
+ "GER40": {
+  "name": "GER40",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 440
+ },
+ "XAUUSD+": {
+  "name": "XAUUSD+",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 100.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 12
+ },
+ "USOUSD": {
+  "name": "USOUSD",
+  "point": 0.001,
+  "digits": 3,
+  "contract_size": 1000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 20.0,
+  "spread": 23
+ },
+ "UKOUSD": {
+  "name": "UKOUSD",
+  "point": 0.001,
+  "digits": 3,
+  "contract_size": 1000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 20.0,
+  "spread": 23
+ },
+ "UK100": {
+  "name": "UK100",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 180
+ },
+ "FRA40": {
+  "name": "FRA40",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 810
+ },
+ "ES35": {
+  "name": "ES35",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 751
+ },
+ "CHINA50": {
+  "name": "CHINA50",
+  "point": 1.0,
+  "digits": 0,
+  "contract_size": 1.0,
+  "volume_min": 0.1,
+  "volume_step": 0.1,
+  "volume_max": 1500.0,
+  "spread": 6
+ },
+ "GBPUSD+": {
+  "name": "GBPUSD+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 22
+ },
+ "USDJPY+": {
+  "name": "USDJPY+",
+  "point": 0.001,
+  "digits": 3,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 17
+ },
+ "AUDUSD+": {
+  "name": "AUDUSD+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 15
+ },
+ "USDCAD+": {
+  "name": "USDCAD+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 53
+ },
+ "EURJPY+": {
+  "name": "EURJPY+",
+  "point": 0.001,
+  "digits": 3,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 0
+ },
+ "GBPJPY+": {
+  "name": "GBPJPY+",
+  "point": 0.001,
+  "digits": 3,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 0
+ },
+ "USDCHF+": {
+  "name": "USDCHF+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 25
+ },
+ "NZDUSD+": {
+  "name": "NZDUSD+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 32
+ },
+ "EURGBP+": {
+  "name": "EURGBP+",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 0
+ },
+ "EURUSD": {
+  "name": "EURUSD",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 500.0,
+  "spread": 19
+ },
+ "XAUUSD": {
+  "name": "XAUUSD",
+  "point": 0.01,
+  "digits": 2,
+  "contract_size": 100.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 100.0,
+  "spread": 14
+ },
+ "GBPUSD": {
+  "name": "GBPUSD",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 500.0,
+  "spread": 55
+ },
+ "USDCAD": {
+  "name": "USDCAD",
+  "point": 1e-05,
+  "digits": 5,
+  "contract_size": 100000.0,
+  "volume_min": 0.01,
+  "volume_step": 0.01,
+  "volume_max": 500.0,
+  "spread": 16
+ }
+}
