@@ -22,6 +22,47 @@ class Hit:
     why: str
 
 
+def scanner_applies(scope: str, venue: str) -> bool:
+    """Сканер смотрит крипту, CFD или оба — как выбрано в панели."""
+    s = str(scope or "all").lower().replace("mt5", "cfd")
+    if s in ("", "all", "*"):
+        return True
+    if venue == "crypto":
+        return s == "crypto"
+    if venue in ("cfd", "mt5"):
+        return s == "cfd"
+    return True
+
+
+def trade_markets(venue: str, scanner: dict | None) -> tuple[bool, bool]:
+    """Какие движки запускать: (crypto, mt5).
+
+    Сканер выкл — как venue. Сканер вкл + scope CFD — крипта не стартует
+    и не входит; иначе «где искать = CFD» тихо торговал бы все USDT-пары.
+    """
+    v = str(venue or "crypto").lower()
+    crypto = v in ("crypto", "both")
+    mt5 = v in ("mt5", "both")
+    sc = scanner or {}
+    if bool(sc.get("enabled", True)):
+        scope = str(sc.get("scope") or "all")
+        crypto = crypto and scanner_applies(scope, "crypto")
+        mt5 = mt5 and scanner_applies(scope, "cfd")
+    return crypto, mt5
+
+
+def allow_new_entries(scanner_on: bool, scope: str, venue: str, *,
+                      held: bool, in_hot: bool) -> bool:
+    """Новый вход. Уже открытое (held) всегда ведём до SL/TP."""
+    if held:
+        return True
+    if not scanner_on:
+        return True
+    if not scanner_applies(scope, venue):
+        return False
+    return in_hot
+
+
 def _row(df: pd.DataFrame, back: int = 2):
     if df is None or len(df) < back + 5:
         return None
@@ -34,10 +75,11 @@ def score_hss(df: pd.DataFrame) -> tuple[float, str]:
         return 0.0, ""
     bits = []
     s = 0.0
-    above = bool(row.close > row.ema)
+    ha_c = getattr(row, "ha_close", row.close)
+    above = bool(ha_c > row.ema)
     bits.append("выше EMA" if above else "ниже EMA")
     s += 0.5
-    if getattr(row, "bars_since_cross", 0) >= 20:
+    if bool(getattr(row, "structure_ready", False)):
         s += 0.5
         bits.append("структура")
     if bool(getattr(row, "is_doji", False)) and bool(getattr(row, "big_doji", False)):
@@ -183,6 +225,8 @@ def score_watcher(watcher) -> list[Hit]:
         if "HSS" in name or inner.name == "scalp_ha":
             sc, why = score_hss(df)
             kind = "HSS"
+            from neft.core.mt5_symbols import canonical, hss_symbol_bias
+            sc += hss_symbol_bias(canonical(getattr(watcher, "symbol", "")))
         elif "Flow" in name or inner.name == "session_flow":
             sc, why = score_flow(df)
             kind = "Flow"

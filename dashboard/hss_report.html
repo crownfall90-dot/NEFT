@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HSS · CFD · Heikin Ashi</title>
+<script src="/lightweight-charts.js?v=423"></script>
+<style>
+:root{
+  --bg:#0b0d10; --panel:#14181f; --line:#243041; --text:#eef2f7; --muted:#8b97a8;
+  --green:#26a69a; --green-bright:#3dd6c3; --red:#ef5350; --red-bright:#ff7b78;
+  --amber:#ffc107; --blue:#5b9fd4; --ema:#c9a227; --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans)}
+header{padding:18px 22px 10px;border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#121722 0%,var(--bg) 100%)}
+header h1{margin:0;font:600 20px/1.2 var(--sans);letter-spacing:-.02em}
+header .sub{color:var(--muted);margin:6px 0 0;font-size:13px}
+.kpis{display:flex;flex-wrap:wrap;gap:18px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+.kpis div span{display:block;color:var(--muted);font-size:12px}
+.kpis div b{font:600 18px/1.2 var(--mono);letter-spacing:-.02em}
+.pos{color:var(--green-bright)}.neg{color:var(--red-bright)}
+.layout{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 150px)}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+aside{border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 150px);background:#0e1218}
+aside table{width:100%;border-collapse:collapse;font:12px/1.35 var(--mono)}
+aside th,aside td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right}
+aside th:first-child,aside td:first-child{text-align:left}
+aside th{color:var(--muted);font:600 11px var(--sans);position:sticky;top:0;background:#151b24;z-index:1}
+aside tr{cursor:pointer}
+aside tr:hover{background:rgba(91,159,212,.08)}
+aside tr.active{background:rgba(201,162,39,.14);outline:1px solid rgba(201,162,39,.25)}
+main{display:flex;flex-direction:column;min-width:0}
+.toolbar{display:flex;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap;background:var(--panel)}
+.toolbar strong{font-size:15px}
+.toolbar .meta{color:var(--muted);font-size:12px}
+.toolbar button{
+  background:#1a2230;color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:6px 11px;font:600 12px var(--sans);cursor:pointer}
+.toolbar button:hover{border-color:#3a4a60}
+.toolbar button.active{border-color:var(--ema);color:var(--ema);background:rgba(201,162,39,.12)}
+.toolbar button.ha-on{border-color:var(--green);color:var(--green-bright);background:rgba(38,166,154,.12)}
+.legend{display:flex;gap:14px;align-items:center;margin-left:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.legend span{font-size:11px;color:var(--muted)}
+#chartWrap{flex:1;min-height:440px;position:relative;background:#080a0d}
+#chart{position:absolute;inset:0}
+.badge-ha{position:absolute;top:10px;left:12px;z-index:2;font:700 11px var(--sans);
+  letter-spacing:.04em;padding:4px 8px;border-radius:6px;
+  background:rgba(38,166,154,.18);color:var(--green-bright);border:1px solid rgba(38,166,154,.35)}
+.trades{max-height:220px;overflow:auto;border-top:1px solid var(--line);background:var(--panel)}
+.trades table{width:100%;border-collapse:collapse;font:12px/1.3 var(--mono)}
+.trades th,.trades td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right}
+.trades th:first-child,.trades td:first-child,
+.trades th:nth-child(2),.trades td:nth-child(2){text-align:left}
+.trades th{color:var(--muted);font:600 11px var(--sans);position:sticky;top:0;background:#151b24}
+.trades tr{cursor:pointer}
+.trades tr:hover{background:rgba(91,159,212,.08)}
+.trades tr.active{background:rgba(201,162,39,.16);outline:1px solid rgba(201,162,39,.3)}
+.side-buy{color:var(--green-bright)}.side-sell{color:var(--red-bright)}
+.trades .hint{padding:8px 12px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="pageTitle">HSS · Heikin Ashi · CFD</h1>
+  <p class="sub" id="sub">загрузка отчёта…</p>
+</header>
+<section class="kpis" id="kpis"></section>
+<div class="layout">
+  <aside>
+    <table>
+      <thead><tr><th>символ</th><th>N</th><th>WR</th><th>%</th></tr></thead>
+      <tbody id="symBody"></tbody>
+    </table>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <strong id="symTitle">—</strong>
+      <span class="meta" id="symMeta"></span>
+      <span style="flex:1"></span>
+      <button type="button" id="btnHa" class="ha-on" onclick="toggleHa()" title="Так HSS видит рынок">HA</button>
+      <button type="button" id="btnEma" class="active" onclick="toggleEma()" title="EMA 100 от реального close">EMA 100</button>
+      <button type="button" id="btnM5" class="active" onclick="setTf('overview')">M5 · обзор</button>
+      <button type="button" id="btnM1" onclick="setTf('trade')">M1 · период</button>
+      <div class="legend">
+        <span><i style="background:#26a69a"></i>рост HA</span>
+        <span><i style="background:#ef5350"></i>падение HA</span>
+        <span><i style="background:#c9a227;border-radius:50%"></i>EMA</span>
+        <span><i style="background:#3dd6c3;border-radius:50%"></i>вход buy</span>
+        <span><i style="background:#ff7b78;border-radius:50%"></i>вход sell</span>
+        <span><i style="background:#ffc107;border-radius:50%"></i>TP</span>
+        <span><i style="background:#ef5350;border-radius:50%"></i>SL</span>
+      </div>
+    </div>
+    <div id="chartWrap">
+      <div class="badge-ha" id="haBadge">HEIKIN ASHI</div>
+      <div id="chart"></div>
+    </div>
+    <div class="trades">
+      <table>
+        <thead><tr><th>вход</th><th>выход</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th><th></th></tr></thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const _q = new URLSearchParams(location.search);
+const WANT_BTC = /btc/i.test(location.pathname) || _q.get("asset")==="btc";
+function detectPageTf(){
+  const q = (_q.get("tf")||"").toLowerCase();
+  const p = location.pathname.toLowerCase();
+  if(p.includes("h1") || q==="h1") return "H1";
+  if(p.includes("m15") || q==="m15") return "M15";
+  if(p.includes("m5") || q==="m5") return "M5";
+  return WANT_BTC ? "M5" : "M1";
+}
+const PAGE_TF = detectPageTf();
+const REPORT_BY_TF = WANT_BTC ? {
+  M1: "/dashboard/hss_report_btc_m5.json",
+  M5: "/dashboard/hss_report_btc_m5.json",
+  M15: "/dashboard/hss_report_btc_m15.json",
+  H1: "/dashboard/hss_report_btc_h1.json",
+} : {
+  M1: "/dashboard/hss_report.json",
+  M5: "/dashboard/hss_report_m5.json",
+  M15: "/dashboard/hss_report_m15.json",
+  H1: "/dashboard/hss_report_h1.json",
+};
+const REPORT_URL = REPORT_BY_TF[PAGE_TF];
+let report = null, chartData = null, chart = null, series = null, emaSeries = null;
+let tf = "overview", useHa = true, useEma = true, _ro = null;
+let selectedTrade = -1, priceLines = [], slBandSeries = null, tpBandSeries = null, entryBandSeries = null;
+let tradeTf = PAGE_TF;
+
+function barSec(){
+  const trade = {M1:60, M5:300, M15:900, H1:3600}[tradeTf] || 60;
+  const overview = {M1:300, M5:900, M15:3600, H1:14400}[tradeTf] || 300;
+  return tf === "trade" ? trade : overview;
+}
+function overviewLabel(){
+  return {M1:"M5", M5:"M15", M15:"H1", H1:"H4"}[tradeTf] || "обзор";
+}
+
+function clearTradeBands(){
+  for(const s of [slBandSeries, tpBandSeries, entryBandSeries]){
+    if(s && chart){ try{ chart.removeSeries(s); }catch(e){} }
+  }
+  slBandSeries = tpBandSeries = entryBandSeries = null;
+}
+
+function cls(v){ return v > 0 ? "pos" : (v < 0 ? "neg" : ""); }
+function fmtPct(v){ return (v>=0?"+":"") + Number(v).toFixed(2) + "%"; }
+function fmtMoney(v){ return (v>=0?"+$":"−$") + Math.abs(Number(v)).toFixed(2); }
+
+function tradeUnix(s){
+  const raw = String(s||"").trim().replace(" ", "T");
+  if(!raw) return 0;
+  const withZ = /Z$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw+"Z";
+  const ms = Date.parse(withZ);
+  return ms ? Math.floor(ms/1000) : 0;
+}
+
+function clearPriceLines(){
+  clearTradeBands();
+  if(!series){ priceLines=[]; return; }
+  for(const pl of priceLines){ try{ series.removePriceLine(pl); }catch(e){} }
+  priceLines = [];
+}
+
+function highlightTradeRow(i){
+  [...$("tradeBody").querySelectorAll("tr[data-i]")].forEach(tr=>{
+    tr.classList.toggle("active", +tr.dataset.i===i);
+  });
+}
+
+/** Клик по сделке → торговый ТФ + зум + линии. */
+function focusTrade(i){
+  if(!chartData || !(chartData.trades||[])[i]) return;
+  selectedTrade = i;
+  highlightTradeRow(i);
+  const t = chartData.trades[i];
+  const t0 = tradeUnix(t.opened_at || t.signal_at);
+  if(!t0) return;
+
+  if(tf !== "trade"){
+    tf = "trade";
+    $("btnM5").classList.toggle("active", false);
+    $("btnM1").classList.toggle("active", true);
+    paint();
+    return;
+  }
+  zoomToSelected();
+}
+
+function zoomToSelected(){
+  if(selectedTrade < 0 || !chart || !series || !chartData) return;
+  const t = chartData.trades[selectedTrade];
+  if(!t) return;
+  const tSig = tradeUnix(t.signal_at);
+  const tFill = tradeUnix(t.opened_at);
+  const t0 = tSig && tFill ? Math.min(tSig, tFill) : (tFill || tSig);
+  const t1 = tradeUnix(t.closed_at) || t0;
+  if(!t0) return;
+  const pad = tf==="trade"
+    ? ({M1:3600, M5:3*3600, M15:8*3600, H1:24*3600}[tradeTf] || 3600)
+    : ({M1:3*3600, M5:8*3600, M15:24*3600, H1:72*3600}[tradeTf] || 3*3600);
+  try{
+    chart.timeScale().setVisibleRange({ from: t0 - pad, to: Math.max(t1, t0) + pad });
+  }catch(e){
+    try{ chart.timeScale().fitContent(); }catch(e2){}
+  }
+  clearPriceLines();
+  const mk = (price, color, title)=>({
+    price:+price, color, lineWidth:1, lineStyle:2,
+    axisLabelVisible:true, title,
+  });
+  const tEntry = tradeUnix(t.opened_at || t.signal_at);
+  const barStep = barSec();
+  const tBandEnd = tEntry + barStep * 2;
+  const bandOpts = (color)=>({
+    color, lineWidth:2, lineStyle:0,
+    priceLineVisible:false, lastValueVisible:false,
+    crosshairMarkerVisible:false,
+  });
+  if(t.entry!=null){
+    entryBandSeries = chart.addLineSeries(bandOpts("#c9a227"));
+    entryBandSeries.setData([
+      {time:tEntry, value:+t.entry},
+      {time:tBandEnd, value:+t.entry},
+    ]);
+  }
+  if(t.sl!=null){
+    slBandSeries = chart.addLineSeries(bandOpts("#ef5350"));
+    slBandSeries.setData([
+      {time:tEntry, value:+t.sl},
+      {time:tBandEnd, value:+t.sl},
+    ]);
+  }
+  if(t.tp!=null){
+    tpBandSeries = chart.addLineSeries(bandOpts("#26a69a"));
+    tpBandSeries.setData([
+      {time:tEntry, value:+t.tp},
+      {time:tBandEnd, value:+t.tp},
+    ]);
+  }
+  if(t.entry!=null) priceLines.push(series.createPriceLine(mk(t.entry, "#c9a227", "вход")));
+  if(t.sl!=null) priceLines.push(series.createPriceLine(mk(t.sl, "#ef5350", "SL")));
+  if(t.tp!=null) priceLines.push(series.createPriceLine(mk(t.tp, "#26a69a", "TP")));
+  $("symMeta").textContent =
+    `${t.side.toUpperCase()} · вход ${String(t.opened_at||"").replace("T"," ").slice(0,16)} → `
+    + `выход ${String(t.closed_at||"").replace("T"," ").slice(0,16)} · ${fmtMoney(t.pnl)} · ${t.label||t.reason||""}`
+    + (t.sl!=null ? ` · SL ${Number(t.sl).toFixed(2)}` : "")
+    + (t.tp!=null ? ` · TP ${Number(t.tp).toFixed(2)}` : "");
+}
+
+/** Та же формула, что neft/core/indicators.py heikin_ashi() */
+function heikinAshi(bars){
+  const out=[]; let prevOpen=null, prevClose=null;
+  for(const c of bars){
+    const hc=(+c.open + +c.high + +c.low + +c.close)/4;
+    const ho=prevOpen==null?(+c.open + +c.close)/2:(prevOpen+prevClose)/2;
+    const hh=Math.max(+c.high, ho, hc), hl=Math.min(+c.low, ho, hc);
+    out.push({time:c.time, open:ho, high:hh, low:hl, close:hc});
+    prevOpen=ho; prevClose=hc;
+  }
+  return out;
+}
+
+/** EMA от реального close — как в HSS (не от HA close). */
+function emaCalc(bars, period){
+  const out=[]; let e=null;
+  const k=2/(period+1);
+  for(const c of bars){
+    const px=+c.close;
+    e = e==null ? px : px*k + e*(1-k);
+    out.push({time:c.time, value:e});
+  }
+  return out;
+}
+
+async function boot(){
+  try{
+    const r = await fetch(REPORT_URL+"?t="+Date.now(), {credentials:"same-origin"});
+    if(r.status===401){
+      $("sub").textContent = "нужен вход в панель — откройте http://127.0.0.1:8787/ , войдите, затем обновите эту страницу";
+      return;
+    }
+    if(!r.ok){
+      $("sub").textContent = "не удалось загрузить отчёт ("+r.status+") — python scripts/"+(WANT_BTC?"hss_btc_report.py":"hss_cfd_report.py --days 90 --tf "+PAGE_TF);
+      return;
+    }
+    report = await r.json();
+  }catch(e){
+    $("sub").textContent = "ошибка загрузки: "+(e&&e.message?e.message:e);
+    return;
+  }
+  const p = report.params || {}, s = report.summary || {};
+  tradeTf = String(p.tf || PAGE_TF).toUpperCase();
+  const asset = WANT_BTC ? "BTC 100x" : "CFD";
+  document.title = "HSS · "+tradeTf+" · "+asset+" · Heikin Ashi";
+  $("pageTitle").textContent = "HSS · "+tradeTf+" · Heikin Ashi · "+asset;
+  $("btnM5").textContent = overviewLabel()+" · обзор";
+  $("btnM1").textContent = tradeTf+" · сделки";
+  const fee = WANT_BTC ? "тейкер 0.055% × 2" : "комиссии Bybit TradFi";
+  $("sub").textContent =
+    `${p.variant_title ? p.variant_title+" · " : ""}${tradeTf} · ${report.days||90} дней · сессия ${p.session||"—"} · R:R ${p.rr} · риск ${p.risk_pct}% · депозит $${p.balance}`
+    + (WANT_BTC ? ` · плечо ${p.leverage||100}x` : "")
+    + ` · ${fee} · график = Heikin Ashi · ${report.ts||""}`;
+  $("kpis").innerHTML = `
+    <div><span>символов</span><b>${s.symbols||0}</b></div>
+    <div><span>сделок</span><b>${s.trades||0}</b></div>
+    <div><span>винрейт</span><b>${Number(s.win_rate||0).toFixed(1)}%</b></div>
+    <div><span>Σ PnL</span><b class="${cls(s.net_profit)}">${fmtMoney(s.net_profit||0)}</b></div>
+    <div><span>Σ доход %</span><b class="${cls(s.return_pct_sum)}">${fmtPct(s.return_pct_sum||0)}</b></div>
+  `;
+  const books = (report.books||[]).slice().sort((a,b)=>{
+    const ar = a.metrics?.return_pct ?? -1e9, br = b.metrics?.return_pct ?? -1e9;
+    return br - ar;
+  });
+  $("symBody").innerHTML = books.map((b,i)=>{
+    if(b.error) return `<tr data-i="${i}"><td>${b.symbol}</td><td colspan="3" class="neg">${b.error}</td></tr>`;
+    const m = b.metrics||{};
+    return `<tr data-i="${i}" data-sym="${b.symbol}" data-chart="${b.chart||""}">
+      <td>${b.symbol}</td><td>${m.trades||0}</td>
+      <td class="${m.win_rate>=50?'pos':'neg'}">${Number(m.win_rate||0).toFixed(0)}%</td>
+      <td class="${cls(m.return_pct)}">${fmtPct(m.return_pct||0)}</td></tr>`;
+  }).join("");
+  $("symBody").onclick = e=>{
+    const tr = e.target.closest("tr[data-chart]");
+    if(!tr) return;
+    [...$("symBody").querySelectorAll("tr")].forEach(x=>x.classList.remove("active"));
+    tr.classList.add("active");
+    loadSym(tr.dataset.sym, tr.dataset.chart);
+  };
+  const first = $("symBody").querySelector("tr[data-chart]");
+  if(first){ first.classList.add("active"); loadSym(first.dataset.sym, first.dataset.chart); }
+  else $("symMeta").textContent = "нет данных по символам";
+}
+
+function setTf(v){
+  tf = v;
+  $("btnM5").classList.toggle("active", v==="overview");
+  $("btnM1").classList.toggle("active", v==="trade");
+  if(chartData) paint();
+}
+function toggleHa(){
+  useHa = !useHa;
+  $("btnHa").classList.toggle("ha-on", useHa);
+  $("btnHa").classList.toggle("active", useHa);
+  $("haBadge").style.display = useHa ? "" : "none";
+  $("haBadge").textContent = useHa ? "HEIKIN ASHI" : "OHLC";
+  if(chartData) paint();
+}
+function toggleEma(){
+  useEma = !useEma;
+  $("btnEma").classList.toggle("active", useEma);
+  if(chartData) paint();
+}
+
+async function loadSym(sym, path){
+  $("symTitle").textContent = sym;
+  $("symMeta").textContent = "загрузка…";
+  selectedTrade = -1;
+  try{
+    const url = path.startsWith("dashboard/") ? "/"+path : "/dashboard/"+path.replace(/^\/+/,"");
+    const r = await fetch(url+"?t="+Date.now(), {credentials:"same-origin"});
+    chartData = await r.json();
+  }catch(e){
+    $("symMeta").textContent = "ошибка загрузки графика";
+    return;
+  }
+  const m = chartData.metrics||{};
+  $("symMeta").textContent =
+    `${(chartData.period||[]).join(" — ")} · сделок ${m.trades||0} · WR ${Number(m.win_rate||0).toFixed(1)}% · PF ${Number(m.profit_factor||0).toFixed(2)} · DD ${Number(m.max_drawdown_pct||0).toFixed(1)}% · клик по сделке → зум`;
+  const rows = chartData.trades||[];
+  $("tradeBody").innerHTML = rows.map((t,i)=>`
+    <tr data-i="${i}" title="${String(t.why||'показать на графике').replace(/"/g,'&quot;')}">
+      <td>${String(t.opened_at||"").replace("T"," ").slice(0,16)}</td>
+      <td>${String(t.closed_at||"").replace("T"," ").slice(0,16)}</td>
+      <td class="${t.side==='buy'?'side-buy':'side-sell'}">${t.side}</td>
+      <td>${Number(t.entry).toFixed(5)}</td>
+      <td>${Number(t.exit).toFixed(5)}</td>
+      <td class="${cls(t.pnl)}">${fmtMoney(t.pnl)}</td>
+      <td>${t.label||t.reason||""}</td>
+    </tr>`).join("") || `<tr><td colspan="7" style="text-align:left;color:var(--muted)">сделок нет</td></tr>`;
+  $("tradeBody").onclick = e=>{
+    const tr = e.target.closest("tr[data-i]");
+    if(!tr) return;
+    focusTrade(+tr.dataset.i);
+  };
+  paint();
+}
+
+function markStyle(m){
+  const kind = String(m.kind||"");
+  const buy = String(m.side||"").toLowerCase()==="buy";
+  if(kind==="entry"){
+    return {
+      color: buy ? "#3dd6c3" : "#ff7b78",
+      shape: "circle",
+      position: buy ? "belowBar" : "aboveBar",
+      text: "",
+    };
+  }
+  if(kind==="exit"){
+    const lab = String(m.label||"").toUpperCase();
+    const isTp = lab === "TP";
+    return {
+      color: isTp ? "#ffc107" : "#ef5350",
+      shape: "circle",
+      position: isTp ? "aboveBar" : "belowBar",
+      text: "",
+    };
+  }
+  return {
+    color: m.color || "#8b97a8",
+    shape: m.shape || "circle",
+    position: m.position || "aboveBar",
+    text: "",
+  };
+}
+
+function paint(){
+  const el = $("chart");
+  if(_ro){ try{ _ro.disconnect(); }catch(e){} _ro=null; }
+  if(chart){ try{ chart.remove(); }catch(e){} chart=null; series=null; emaSeries=null; }
+
+  const raw = (tf==="trade"
+    ? (chartData.candles_trade || (tradeTf==="M1" ? chartData.candles_m1 : chartData.candles_m5))
+    : (chartData.candles_overview || chartData.candles_m15 || chartData.candles_m5)
+  ) || [];
+  if(!raw.length) return;
+
+  const candles = useHa ? heikinAshi(raw) : raw.map(c=>({
+    time:c.time, open:+c.open, high:+c.high, low:+c.low, close:+c.close
+  }));
+  const times = new Set(candles.map(c=>c.time));
+  const emaPeriod = (report?.params?.ema) || 100;
+  const emaData = emaCalc(raw, emaPeriod); // всегда от реального close
+
+  chart = LightweightCharts.createChart(el, {
+    layout:{
+      background:{ type:"solid", color:"#080a0d" },
+      textColor:"#8b97a8",
+      fontSize:11,
+    },
+    grid:{
+      vertLines:{ color:"#15202b" },
+      horzLines:{ color:"#15202b" },
+    },
+    rightPriceScale:{ borderColor:"#243041", scaleMargins:{ top:0.08, bottom:0.08 } },
+    timeScale:{ borderColor:"#243041", timeVisible:true, secondsVisible:false, rightOffset:6 },
+    crosshair:{
+      mode:0,
+      vertLine:{ color:"rgba(139,151,168,.45)", style:2, labelBackgroundColor:"#1a2230" },
+      horzLine:{ color:"rgba(139,151,168,.45)", style:2, labelBackgroundColor:"#1a2230" },
+    },
+  });
+
+  series = chart.addCandlestickSeries({
+    upColor: "#26a69a",
+    downColor: "#ef5350",
+    borderUpColor: "#26a69a",
+    borderDownColor: "#ef5350",
+    wickUpColor: "#26a69a",
+    wickDownColor: "#ef5350",
+    borderVisible: true,
+    priceLineVisible: false,
+    lastValueVisible: true,
+  });
+  series.setData(candles);
+
+  if(useEma){
+    emaSeries = chart.addLineSeries({
+      color: "#c9a227",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      title: "EMA "+emaPeriod,
+    });
+    emaSeries.setData(emaData);
+  }
+
+  const sorted = [...times].sort((a,b)=>a-b);
+  const step = barSec();
+  function snap(t){
+    const floor = Math.floor(Number(t)/step)*step;
+    if(times.has(floor)) return floor;
+    let best = sorted[0], bd = Infinity;
+    for(const x of sorted){
+      const d = Math.abs(x-t);
+      if(d < bd){ bd = d; best = x; }
+      if(x > t && d > bd) break;
+    }
+    return best;
+  }
+
+  // Одна точка на бар: выход важнее входа (если на одной минуте).
+  const byTime = new Map();
+  for(const m of (chartData.markers||[])){
+    const t = snap(m.time);
+    if(!t) continue;
+    const st = markStyle(m);
+    const prev = byTime.get(t);
+    const rank = k => k==="exit" ? 2 : 1;
+    if(!prev || rank(m.kind) >= rank(prev._kind||"")){
+      byTime.set(t, { ...st, time:t, _kind:m.kind });
+    }
+  }
+  const marks = [...byTime.values()].map(({_kind, ...x})=>x);
+  if(series.setMarkers) series.setMarkers(marks);
+
+  chart.timeScale().fitContent();
+  _ro = new ResizeObserver(()=>{
+    if(!chart) return;
+    chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+  });
+  _ro.observe(el.parentElement || el);
+  chart.applyOptions({ width: el.clientWidth, height: el.clientHeight });
+
+  if(selectedTrade >= 0){
+    highlightTradeRow(selectedTrade);
+    // После перерисовки / смены обзор↔сделки — вернуть зум на выбранную сделку.
+    requestAnimationFrame(()=>zoomToSelected());
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

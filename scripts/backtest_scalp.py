@@ -15,8 +15,9 @@ from rich.console import Console
 from rich.table import Table
 
 from neft.backtest import data, metrics
-from neft.backtest.engine import Backtester, Costs
+from neft.backtest.engine import Backtester
 from neft.core import symbols
+from neft.core.bybit_cfd_fees import costs_for
 from neft.core.risk import RiskLimits, RiskManager
 from neft.strategies.scalp_ha import ScalpHA
 
@@ -25,8 +26,8 @@ con = Console()
 
 def run(df, *, balance=1000.0, rr=1.0, risk=1.0, pullback=2, ema=100,
         doji=0.10, clean=0.05, match=False, spread=1.0, symbol="EURUSD+",
-        vol_mode="min", session=None, vol_window=2,
-        entry_mode="market", tp_from_extreme=True):
+        vol_mode="min", session=None, vol_window=3,
+        entry_mode="stop", tp_from_extreme=True):
     spec = symbols.load(symbol)
     limits = RiskLimits(risk_per_trade_pct=risk, max_risk_per_trade_pct=3.0,
                         max_volume=10.0, max_daily_loss_pct=100.0,
@@ -38,8 +39,7 @@ def run(df, *, balance=1000.0, rr=1.0, risk=1.0, pullback=2, ema=100,
                     vol_mode=vol_mode, session=session, vol_window=vol_window,
                     entry_mode=entry_mode, tp_from_extreme=tp_from_extreme,
                     risk_manager=rm, spec=spec)
-    costs = Costs(spread_points=spread, contract_size=spec.contract_size,
-                  point=spec.point)
+    costs = costs_for(spec, spread_points=spread)
     res = Backtester(strat, rm, costs, start_balance=balance).run(df)
     m = metrics.compute(res.equity, res.trades, balance, res.ruined)
     return strat, res, m

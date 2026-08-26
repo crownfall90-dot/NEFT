@@ -68,7 +68,7 @@ def features_at(kind: str, row) -> dict:
             if v is not None:
                 out[k] = v
         for k in ("ha_bull", "is_doji", "clean_bull", "clean_bear",
-                   "big_doji", "high_volume", "small_doji"):
+                   "big_doji", "high_volume", "small_doji", "structure_ready"):
             v = getattr(row, k, None)
             if v is not None:
                 out[k] = float(bool(v))

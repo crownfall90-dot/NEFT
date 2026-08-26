@@ -14,8 +14,9 @@ from rich.console import Console
 from rich.table import Table
 
 from neft.backtest import data, metrics
-from neft.backtest.engine import Backtester, Costs
+from neft.backtest.engine import Backtester
 from neft.core import symbols
+from neft.core.bybit_cfd_fees import costs_for
 from neft.core.portfolio import Portfolio
 from neft.core.routing import enabled_for
 from neft.core.risk import RiskLimits, RiskManager
@@ -32,10 +33,9 @@ def build(symbol: str, balance: float, risk: float, route: bool = True):
                         max_drawdown_pct=100.0, min_free_margin_pct=0.0)
     rm = RiskManager(start_balance=balance, limits=limits)
 
-    # vol_window=2 и вход стоп-ордером: обе настройки подняли винрейт на всех
-    # инструментах при меньшем числе сделок.
+    # Чеклист HSS: объёмная doji ≥ одной из последних 3 свечей, вход от фитиля.
     hss = ScalpHA(rr=1.0, pullback_bars=2, session=(16, 19), vol_mode="min",
-                  vol_window=2, entry_mode="stop",
+                  vol_window=3, entry_mode="stop",
                   risk_pct=risk, risk_manager=rm, spec=spec)
     lsr = LondonSR(london=(11, 16), ny=(16, 23), min_rr=1.0,
                    risk_pct=risk, risk_manager=rm, spec=spec)
@@ -53,8 +53,7 @@ def run(symbol: str, bars: int, balance: float, risk: float, spread: float,
         route: bool = True):
     df = data.load(symbol, "M1", bars)
     pf, rm, spec = build(symbol, balance, risk, route)
-    costs = Costs(spread_points=spread, contract_size=spec.contract_size,
-                  point=spec.point)
+    costs = costs_for(spec, spread_points=spread)
     res = Backtester(pf, rm, costs, start_balance=balance).run(df)
     m = metrics.compute(res.equity, res.trades, balance, res.ruined)
     return pf, res, m, df

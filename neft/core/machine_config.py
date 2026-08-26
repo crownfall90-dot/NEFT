@@ -44,7 +44,7 @@ DEFAULT: dict = {
     "leverage_crypto": 5,
     "objective": "winrate_risk",  # не доходность: винрейт и короткий риск
     "risk_pct": 0.5,           # панель может сменить; в load() 0.1–15%.
-    "rr": 1.0,
+    "rr": 1.2,
     "pullback_bars": 2,
     "hss_session": [16, 19],
     "hss_24h": False,
@@ -59,12 +59,13 @@ DEFAULT: dict = {
     "venue": "crypto",
     "exchange": "bybit",
     "mt5_symbols": [
-        "NAS100", "DJ30", "GER40",
-        "EURUSD", "EURUSD+", "XAUUSD", "XAUUSD+", "GBPUSD", "GBPUSD+",
+        "NAS100",
+        "DJ30", "FRA40", "XAUUSD+", "UKOUSD",
+        "GBPUSD+", "USDJPY+", "USDCAD+", "USDCHF+", "EURJPY+",
     ],
     "crypto_symbols": list(CRYPTO_STARTER),
     "crypto_routes": {},
-    "scanner": {"enabled": True, "top_k": 1, "min_score": 1.5},
+    "scanner": {"enabled": True, "top_k": 2, "min_score": 1.2, "scope": "all"},
     "allow_live": False,
     "news": {
         "gate": True,
@@ -76,28 +77,38 @@ DEFAULT: dict = {
         "block_forex": True,
         "telegram_briefing": True,
     },
+    "news_bot": {
+        "enabled": False,
+        "deposit": 1000.0,
+        "risk_pct": 1.0,
+        "modes": ["impulse", "fade", "straddle"],
+        "high_only": True,
+        "pre_minutes": 2,
+        "post_window_min": 15,
+        "impulse_atr": 0.8,
+        "rr": 1.5,
+        "symbols": [],
+    },
     "strategies": {
         "hss": {
-            "enabled": True, "rr": 1.0, "tf": "M1", "pullback": 2,
+            "enabled": True, "rr": 1.2, "tf": "M5", "pullback": 2,
             "session": [16, 19], "all_day": False, "ema": 100,
+            "vol_mode": "min", "matching_doji": False, "ta_filter": "off",
+            "entry_mode": "stop", "crypto_enabled": False,
         },
         "london_sr": {
             "enabled": True, "min_rr": 1.0, "tf": "M1",
             "london": [11, 16], "ny": [16, 23],
         },
         "breakout": {
-            "enabled": False, "rr": 1.5, "tf": "M5",
+            "enabled": False, "rr": 2.0, "tf": "M5",
             "box": [10, 16], "entry_from": 16, "entry_until": 18,
-        },
-        "martingale": {
-            "enabled": False, "max_steps": 6, "multiplier": 2.0,
-            "tp_pips": 10, "sl_pips": 10,
         },
         "squeeze": {
             "enabled": False, "min_rr": 2.0, "tf": "M5", "min_taps": 2,
         },
         "session_flow": {
-            "enabled": True, "rr": 1.0, "tf": "5m",
+            "enabled": False, "rr": 1.0, "tf": "5m",
             "setups": "blend", "gate_regime": True,
         },
         "playbook": {
@@ -157,6 +168,30 @@ def account_for_mode(cfg: dict, mode: str) -> dict:
         {**MODE_ACCOUNT_DEFAULTS[mode], **accounts.get(mode, {})}, mode)
 
 
+SCAN_SCOPES = ("all", "crypto", "cfd")
+
+
+def _norm_scanner(raw: dict | None) -> dict:
+    s = dict(raw or {})
+    scope = str(s.get("scope") or "all").lower().replace("mt5", "cfd")
+    if scope not in SCAN_SCOPES:
+        scope = "all"
+    try:
+        top_k = int(s.get("top_k") or 2)
+    except (TypeError, ValueError):
+        top_k = 2
+    try:
+        min_score = float(s.get("min_score") or 1.2)
+    except (TypeError, ValueError):
+        min_score = 1.2
+    return {
+        "enabled": bool(s.get("enabled", True)),
+        "top_k": max(1, min(8, top_k)),
+        "min_score": max(0.1, min(5.0, min_score)),
+        "scope": scope,
+    }
+
+
 def _norm_session(v):
     if v is None:
         return None
@@ -182,10 +217,10 @@ def load() -> dict:
     _migrate_accounts(cfg)
     cfg["exchange"] = "bybit"
     cfg["rr"] = max(0.5, float(cfg.get("strategies", {}).get("hss", {}).get("rr") or cfg.get("rr") or 1.0))
-    cfg["hss_session"] = _norm_session(cfg.get("hss_session")) or [16, 19]
+    cfg["hss_session"] = _norm_session(cfg.get("hss_session")) or [8, 20]
     cfg["london"] = _norm_session(cfg.get("london")) or [11, 16]
     cfg["ny"] = _norm_session(cfg.get("ny")) or [16, 23]
-    cfg.setdefault("scanner", {"enabled": True, "top_k": 2, "min_score": 1.2})
+    cfg["scanner"] = _norm_scanner(cfg.get("scanner"))
     raw_syms = cfg.get("crypto_symbols") or CRYPTO_STARTER
     syms = []
     for s in raw_syms:
@@ -199,6 +234,7 @@ def load() -> dict:
                    or cfg.get("hss_24h"))
     cfg["hss_24h"] = all_day
     cfg.setdefault("strategies", {}).setdefault("hss", {})["all_day"] = all_day
+    (cfg.get("strategies") or {}).pop("martingale", None)
     kit = kit_from_config(cfg.get("strategies") or {}, hss_24h=all_day)
     cfg["crypto_routes"] = {s: [dict(r) for r in kit] for s in syms}
     return cfg
@@ -222,21 +258,21 @@ def save(cfg: dict) -> dict:
             continue
         if k == "strategies" and isinstance(v, dict):
             for sk, sv in v.items():
+                if sk == "martingale":
+                    continue
                 if isinstance(sv, dict):
                     merged["strategies"][sk] = {**merged["strategies"].get(sk, {}), **sv}
                 else:
                     merged["strategies"][sk] = sv
         elif k == "news" and isinstance(v, dict):
             merged["news"] = {**merged.get("news", {}), **v}
+        elif k == "news_bot" and isinstance(v, dict):
+            merged["news_bot"] = {**merged.get("news_bot", {}), **v}
+            nb = merged["news_bot"]
+            nb["deposit"] = float(nb.get("deposit") or 1000.0)
+            nb["risk_pct"] = max(0.1, min(1.0, float(nb.get("risk_pct") or 1.0)))
         elif k == "scanner" and isinstance(v, dict):
-            merged["scanner"] = {
-                **{"enabled": True, "top_k": 2, "min_score": 1.2},
-                **merged.get("scanner", {}),
-                **v,
-            }
-            merged["scanner"]["enabled"] = bool(merged["scanner"].get("enabled", True))
-            merged["scanner"]["top_k"] = max(1, min(8, int(merged["scanner"].get("top_k") or 2)))
-            merged["scanner"]["min_score"] = float(merged["scanner"].get("min_score") or 1.2)
+            merged["scanner"] = _norm_scanner({**merged.get("scanner", {}), **v})
         elif k == "crypto_symbols" and isinstance(v, list):
             cleaned = []
             for s in v:
@@ -253,6 +289,7 @@ def save(cfg: dict) -> dict:
                    or merged.get("hss_24h"))
     merged["hss_24h"] = all_day
     merged.setdefault("strategies", {}).setdefault("hss", {})["all_day"] = all_day
+    (merged.get("strategies") or {}).pop("martingale", None)
     kit = kit_from_config(merged.get("strategies") or {},
                           hss_24h=bool(merged.get("hss_24h")))
     merged["crypto_routes"] = {s: [dict(r) for r in kit] for s in merged["crypto_symbols"]}
@@ -264,7 +301,7 @@ def save(cfg: dict) -> dict:
 def hss_session(cfg: dict) -> tuple[int, int] | None:
     if cfg.get("hss_24h"):
         return None
-    s = cfg.get("hss_session") or [16, 19]
+    s = cfg.get("hss_session") or [8, 20]
     return int(s[0]), int(s[1])
 
 

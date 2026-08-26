@@ -60,10 +60,11 @@ def add_features(df: pd.DataFrame, ema_period: int = 100,
                  doji_body_pct: float = 0.10,
                  clean_wick_pct: float = 0.05,
                  vol_mode: str = "min",
-                 vol_window: int = 2) -> pd.DataFrame:
-    """Готовит все колонки, которые нужны скальпинг-стратегии."""
+                 vol_window: int = 3) -> pd.DataFrame:
+    """Готовит все колонки, которые нужны скальпинг-стратегии (чеклист HSS)."""
     out = df.copy()
     out = pd.concat([out, heikin_ashi(df)], axis=1)
+    # EMA от реального close — как на панели: HA-свечи меняем, линия та же.
     out["ema"] = ema(out.close, ema_period)
 
     rng = (out.ha_high - out.ha_low).replace(0, np.nan)
@@ -71,10 +72,8 @@ def add_features(df: pd.DataFrame, ema_period: int = 100,
 
     out["ha_bull"] = out.ha_close > out.ha_open
     out["body_ratio"] = (body / rng).fillna(1.0)
-    out["is_doji"] = out.body_ratio <= doji_body_pct
 
-    # «Чистая» свеча по определению Heikin Ashi: у сильной бычьей нет нижнего
-    # фитиля, у сильной медвежьей — верхнего.
+    # «Чистая» свеча: у бычьей нет нижнего фитиля, у медвежьей — верхнего.
     top = out.ha_high - out[["ha_open", "ha_close"]].max(axis=1)
     bot = out[["ha_open", "ha_close"]].min(axis=1) - out.ha_low
     out["top_wick_ratio"] = (top / rng).fillna(0.0)
@@ -82,21 +81,29 @@ def add_features(df: pd.DataFrame, ema_period: int = 100,
     out["clean_bull"] = out.ha_bull & (out.bot_wick_ratio <= clean_wick_pct)
     out["clean_bear"] = (~out.ha_bull) & (out.top_wick_ratio <= clean_wick_pct)
 
-    # "High volume" в оригинале означает РАЗМЕР свечи, а не тиковый объём:
-    # «the size of the doji has to be bigger than the size of the last one to
-    # three candles… bigger than at least ONE of the last three».
+    # Doji: маленькое тело и фитили с обеих сторон (как на обычных свечах).
+    wick_min = 0.02
+    out["is_doji"] = (
+        (out.body_ratio <= doji_body_pct)
+        & (out.top_wick_ratio > wick_min)
+        & (out.bot_wick_ratio > wick_min)
+    )
+
+    # «High volume» — размер свечи, не тиковый объём.
+    # Крупнее или равна хотя бы одной из последних 1–3 свечей:
+    # size >= min(последние vol_window), vol_window=3.
     size = out.ha_high - out.ha_low
     out["size"] = size
     win = size.rolling(vol_window)
     out["size_ref"] = (win.min() if vol_mode == "min" else win.max()).shift(1)
-    out["big_doji"] = size > out.size_ref
+    out["big_doji"] = size >= out.size_ref
     out["high_volume"] = out.big_doji          # совместимость с прежним именем
 
     # Тиковый объём оставляем справочно — на форексе он не равен реальному.
     out["tickvol_ref"] = out.tick_volume.rolling(3).min().shift(1)
     out["tickvol_ok"] = out.tick_volume >= out.tickvol_ref
 
-    # Маленькая doji перед сигнальной обесценивает сетап (правило автора).
-    out["small_doji"] = out.is_doji & (size <= out.size_ref)
+    # Мелкая doji — doji, которая не проходит порог размера.
+    out["small_doji"] = out.is_doji & ~out.big_doji.fillna(False)
 
     return out

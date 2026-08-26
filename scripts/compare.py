@@ -18,8 +18,9 @@ from rich.console import Console
 from rich.table import Table
 
 from neft.backtest import data, metrics
-from neft.backtest.engine import Backtester, Costs
+from neft.backtest.engine import Backtester
 from neft.core import symbols
+from neft.core.bybit_cfd_fees import costs_for
 from neft.core.risk import RiskLimits, RiskManager
 from neft.strategies.london_breakout import LondonBreakout
 from neft.strategies.london_sr import LondonSR
@@ -42,7 +43,7 @@ def evaluate(symbol, kind, risk=0.75, bars=99_000):
     rm = make_rm(risk)
     if kind == "HSS":
         strat = ScalpHA(rr=1.0, pullback_bars=2, session=(16, 19), vol_mode="min",
-                        vol_window=2, entry_mode="stop",
+                        vol_window=3, entry_mode="stop",
                         risk_pct=risk, risk_manager=rm, spec=spec)
     elif kind == "London S/R":
         strat = LondonSR(london=(11, 16), ny=(16, 23), min_rr=1.0,
@@ -50,8 +51,7 @@ def evaluate(symbol, kind, risk=0.75, bars=99_000):
     else:
         strat = LondonBreakout(rr=1.5, risk_pct=risk, risk_manager=rm, spec=spec)
 
-    costs = Costs(spread_points=spec.default_spread,
-                  contract_size=spec.contract_size, point=spec.point)
+    costs = costs_for(spec)
     res = Backtester(strat, rm, costs, start_balance=BAL).run(df)
     m = metrics.compute(res.equity, res.trades, BAL, res.ruined)
 

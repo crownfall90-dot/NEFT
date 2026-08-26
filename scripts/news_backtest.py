@@ -75,7 +75,7 @@ def _setup(symbol, tf, bars, risk, session, utc_offset, buffer, with_news):
         rm.set_news_gate(gate, utc_offset_hours=offset)
 
     strat = ScalpHA(rr=1.0, pullback_bars=2, session=sess, vol_mode="min",
-                    vol_window=2, entry_mode="stop", risk_pct=risk,
+                    vol_window=3, entry_mode="stop", risk_pct=risk,
                     risk_manager=rm, spec=spec)
     costs = Costs(spread_points=spread, contract_size=contract, point=point)
     res = Backtester(strat, rm, costs, start_balance=1000.0, symbol=symbol).run(df)

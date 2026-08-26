@@ -51,7 +51,7 @@ def state(symbol: str, pullback_bars: int, any_hour: bool) -> dict:
     hour = closed.time.hour
     in_session = any_hour or (SESSION[0] <= hour < SESSION[1])
 
-    above = closed.close > closed.ema
+    above = bool(closed.ha_close > closed.ema)
     side = "BUY" if above else "SELL"
 
     # Сколько подряд чистых свечей отката прямо сейчас

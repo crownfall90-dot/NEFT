@@ -11,6 +11,7 @@ data/panel_token
 data/*.csv
 data/crypto/
 data/*_cache.json
+data/session_salt
 dashboard/crypto_chart.json
 
 # Локальные артефакты отладки браузера, не часть проекта.

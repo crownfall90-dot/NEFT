@@ -24,29 +24,51 @@ def crypto_strategy(
     pullback: int = 2,
     london: tuple[int, int] = CRYPTO_LONDON,
     flow: dict | None = None,
+    rr_by_strategy: dict | None = None,
 ):
+    """rr_by_strategy — R:R, заданный в панели отдельно на каждую стратегию.
+
+    Раньше все стратегии получали один общий rr (из настроек HSS), а Squeeze
+    и Breakout ещё и зажимали его снизу через max(...) — то есть выбранное
+    в панели значение для них молча игнорировалось. Теперь у каждой свой,
+    а общий rr остаётся запасным вариантом, если своего не задано.
+    """
     name = route["strategy"]
     sess = route.get("session")
     if isinstance(sess, list):
         sess = (int(sess[0]), int(sess[1]))
     kw = dict(risk_pct=risk, risk_manager=risk_manager, spec=spec)
 
+    def rr_for(key: str, fallback: float) -> float:
+        """R:R стратегии из панели; 0/пусто — берём запасной."""
+        raw = (rr_by_strategy or {}).get(key)
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            val = 0.0
+        return val if val > 0 else fallback
+
     if name == "HSS":
-        return ScalpHA(rr=rr, pullback_bars=pullback, session=sess,
-                       vol_mode="min", vol_window=2, entry_mode="stop", **kw)
+        # Крипта: doji на S/R + ТА. CFD собирает ScalpHA сам, без setup_mode.
+        return ScalpHA(rr=rr_for("hss", rr), pullback_bars=pullback, session=sess,
+                       vol_mode="min", vol_window=3, entry_mode="market",
+                       setup_mode="sr_doji", ta_filter="full",
+                       require_structure=False, block_after_small_doji=False,
+                       **kw)
     if name in ("London S/R", "LondonSR"):
-        return LondonSR(london=london, ny=sess or CRYPTO_NY, min_rr=rr, **kw)
+        return LondonSR(london=london, ny=sess or CRYPTO_NY,
+                        min_rr=rr_for("london_sr", rr), **kw)
     if name in ("Breakout", "London Breakout"):
-        return LondonBreakout(rr=max(rr, 1.5), session=sess, **kw)
+        return LondonBreakout(rr=rr_for("breakout", 2.0), session=sess, **kw)
     if name == "Squeeze":
-        return Squeeze(min_rr=max(rr, 1.8), session=sess, **kw)
+        return Squeeze(min_rr=rr_for("squeeze", 2.0), session=sess, **kw)
     if name in ("Flow", "Session Flow"):
         f = dict(flow or {})
         setups = route.get("setups") or f.get("setups", "blend")
         return SessionFlow(
             setups=setups,
             gate_regime=bool(f.get("gate_regime", True)),
-            rr=float(f.get("rr", 1.0)),
+            rr=rr_for("session_flow", float(f.get("rr", 1.0))),
             session=sess,
             **kw,
         )
@@ -55,6 +77,7 @@ def crypto_strategy(
             tf=route.get("tf", "5m"), rr=rr, risk=risk,
             risk_manager=risk_manager, spec=spec, pullback=pullback,
             london=london, flow=flow, session=sess,
+            rr_by_strategy=rr_by_strategy,
         )
     raise ValueError(f"неизвестная стратегия маршрута: {name}")
 
@@ -70,6 +93,7 @@ def crypto_playbook(
     london: tuple[int, int] = CRYPTO_LONDON,
     flow: dict | None = None,
     session=None,
+    rr_by_strategy: dict | None = None,
 ) -> Portfolio:
     """Единая машина: все рабочие куски на одном ТФ, позиция всё ещё одна.
 
@@ -78,26 +102,39 @@ def crypto_playbook(
     """
     kw = dict(risk_pct=risk, risk_manager=risk_manager, spec=spec)
     f = dict(flow or {})
+    rrs = rr_by_strategy or {}
+
+    def rr_for(key: str, fallback: float) -> float:
+        try:
+            val = float(rrs.get(key))
+        except (TypeError, ValueError):
+            val = 0.0
+        return val if val > 0 else fallback
+
     pf = Portfolio()
     pf.name = "playbook"
     m1 = tf in ("1m", "M1")
     if m1:
-        pf.add(ScalpHA(rr=rr, pullback_bars=pullback, session=session,
-                       vol_mode="min", vol_window=2, entry_mode="stop", **kw), "HSS")
-        pf.add(LondonSR(london=london, ny=session or CRYPTO_NY, min_rr=rr, **kw),
-               "London S/R")
+        pf.add(ScalpHA(rr=rr_for("hss", rr), pullback_bars=pullback, session=session,
+                       vol_mode="min", vol_window=3, entry_mode="market",
+                       setup_mode="sr_doji", ta_filter="full",
+                       require_structure=False, block_after_small_doji=False,
+                       **kw), "HSS")
+        pf.add(LondonSR(london=london, ny=session or CRYPTO_NY,
+                        min_rr=rr_for("london_sr", rr), **kw), "London S/R")
         return pf
     pf.add(SessionFlow(
         setups=f.get("setups", "blend"),
         gate_regime=bool(f.get("gate_regime", True)),
-        rr=float(f.get("rr", 1.0)),
+        rr=rr_for("session_flow", float(f.get("rr", 1.0))),
         session=session,
         **kw,
     ), "Flow")
     if f.get("squeeze"):
-        pf.add(Squeeze(min_rr=float(f.get("squeeze_rr", 2.0)), session=session, **kw), "Squeeze")
+        pf.add(Squeeze(min_rr=rr_for("squeeze", float(f.get("squeeze_rr", 2.0))),
+                       session=session, **kw), "Squeeze")
     pf.add(LondonSR(london=london, ny=session or CRYPTO_NY,
-                    min_rr=rr, **kw), "London S/R")
+                    min_rr=rr_for("london_sr", rr), **kw), "London S/R")
     return pf
 
 

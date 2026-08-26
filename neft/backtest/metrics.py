@@ -1,5 +1,4 @@
-"""Метрики результата. Для мартингейла главные — просадка и максимальная
-серия убытков, а не итоговая прибыль."""
+"""Метрики результата: доход, винрейт, просадка, серия убытков."""
 from dataclasses import dataclass, asdict
 
 import pandas as pd
@@ -49,6 +48,14 @@ def compute(equity: pd.Series, trades: list[ClosedTrade],
     dd_pct = (dd_abs / peak * 100)
     end = float(equity.iloc[-1]) if len(equity) else start_balance
 
+    # Не Infinity: иначе json.dumps ломает фронт (Unexpected token 'I').
+    if not losses:
+        pf = 999.0 if wins else 0.0
+    elif gross_loss <= 0:
+        pf = 999.0 if gross_win > 0 else 0.0
+    else:
+        pf = gross_win / gross_loss
+
     return Metrics(
         start_balance=start_balance,
         end_balance=end,
@@ -58,7 +65,7 @@ def compute(equity: pd.Series, trades: list[ClosedTrade],
         wins=len(wins),
         losses=len(losses),
         win_rate=len(wins) / len(trades) * 100 if trades else 0.0,
-        profit_factor=gross_win / gross_loss if gross_loss else float("inf"),
+        profit_factor=pf,
         max_drawdown_pct=float(dd_pct.max()) if len(dd_pct) else 0.0,
         max_drawdown_abs=float(dd_abs.max()) if len(dd_abs) else 0.0,
         max_loss_streak=best_streak,

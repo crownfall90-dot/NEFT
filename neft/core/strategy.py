@@ -49,6 +49,10 @@ class ClosedTrade:
     opened_at: pd.Timestamp | None = None
     closed_at: pd.Timestamp | None = None
     strategy: str = ""
+    sl: float | None = None
+    tp: float | None = None
+    signal_reason: str = ""
+    signal_at: pd.Timestamp | None = None
 
 
 class Strategy(ABC):
@@ -64,9 +68,21 @@ class Strategy(ABC):
         """Вызывается на каждом закрытом баре. None = ничего не делаем."""
 
     def on_trade_closed(self, trade: ClosedTrade) -> None:
-        """Результат сделки. Мартингейлу это нужно, чтобы удвоить лот."""
+        """Результат сделки. Нужен стратегиям, которые меняют объём после закрытия."""
 
     def on_signal_rejected(self, signal: Signal, reason: str) -> None:
         """Риск-слой не пропустил сигнал. Без этого стратегия, наращивающая
         объём, зависает: сигнал отклонён, шаг серии не меняется, и следующий
         сигнал отклоняется снова."""
+
+    def manage_position(
+        self,
+        bar: Bar,
+        side: Side,
+        entry: float,
+        sl: float,
+        tp: float,
+    ) -> tuple[float, float] | None:
+        """Опционально подтянуть SL/TP на баре (trailing / BE).
+        None = без изменений. Движок зовёт до проверки касания стопов."""
+        return None

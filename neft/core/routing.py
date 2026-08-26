@@ -12,20 +12,28 @@
 """
 
 ROUTES: dict[str, dict[str, bool]] = {
-    #                HSS(M1)  London S/R(M1)  Breakout(M5)
-    "NAS100":  {"HSS": True,  "London S/R": True,  "Breakout": True},
+    # HSS M5 plus_only (90д): только плюсовые символы. NAS100 — preflight, без HSS.
+    "NAS100":  {"HSS": False, "London S/R": True,  "Breakout": False},
     "DJ30":    {"HSS": True,  "London S/R": False, "Breakout": False},
+    "FRA40":   {"HSS": True,  "London S/R": False, "Breakout": False},
+    "XAUUSD+": {"HSS": True,  "London S/R": True,  "Breakout": False},
+    "UKOUSD":  {"HSS": True,  "London S/R": False, "Breakout": False},
+    "GBPUSD+": {"HSS": True,  "London S/R": True,  "Breakout": False},
+    "USDJPY+": {"HSS": True,  "London S/R": True,  "Breakout": False},
+    "USDCAD+": {"HSS": True,  "London S/R": True,  "Breakout": False},
+    "USDCHF+": {"HSS": True,  "London S/R": True,  "Breakout": False},
+    "EURJPY+": {"HSS": True,  "London S/R": True,  "Breakout": False},
     "GER40":   {"HSS": False, "London S/R": True,  "Breakout": True},
-    "EURUSD+": {"HSS": True,  "London S/R": True,  "Breakout": True},
-    "XAUUSD+": {"HSS": False, "London S/R": True,  "Breakout": False},
+    "EURUSD+": {"HSS": False, "London S/R": True,  "Breakout": True},
     "USOUSD":  {"HSS": False, "London S/R": False, "Breakout": False},
-    "UKOUSD":  {"HSS": False, "London S/R": False, "Breakout": False},
+    "AUDUSD+": {"HSS": False, "London S/R": True,  "Breakout": False},
+    "EURGBP+": {"HSS": False, "London S/R": True,  "Breakout": False},
 }
 
-# RR у пробоя подбирается отдельно: на наших данных 1:1.5 сильнее авторских 1:2.
-BREAKOUT_RR = {"NAS100": 1.5, "GER40": 2.0, "EURUSD+": 1.5}
+# RR пробоя — как у автора: 2:1. Не подгоняем под бэктест.
+BREAKOUT_RR = {"NAS100": 2.0, "GER40": 2.0, "EURUSD+": 2.0}
 
-DEFAULT = {"HSS": True, "London S/R": True, "Breakout": False, "Squeeze": False}
+DEFAULT = {"HSS": False, "London S/R": True, "Breakout": False, "Squeeze": False}
 
 # Squeeze (Joovier Day 9): треугольник LH+HL, вход на сломе свинга. По умолчанию
 # выключен в машине, пока нет отдельного годового прогона — включается в
@@ -33,7 +41,14 @@ DEFAULT = {"HSS": True, "London S/R": True, "Breakout": False, "Squeeze": False}
 
 
 def enabled_for(symbol: str) -> dict[str, bool]:
-    return ROUTES.get(symbol, DEFAULT)
+    if symbol in ROUTES:
+        return ROUTES[symbol]
+    # Bybit XAUUSD+ ↔ MetaQuotes XAUUSD и т.п.
+    base = symbol[:-1] if symbol.endswith("+") else symbol
+    for key, routes in ROUTES.items():
+        if key == base or key.rstrip("+") == base or key == base + "+":
+            return routes
+    return DEFAULT
 
 
 # ── Крипта ──────────────────────────────────────────────────────────────
@@ -171,13 +186,19 @@ def kit_from_config(strategies: dict | None, *, hss_24h: bool = False) -> list[d
                 rec.update(extra)
             kit.append(rec)
 
+    def utc3_to_utc(pair) -> tuple[int, int] | None:
+        """Панель в UTC+3, свечи Binance — UTC."""
+        if pair is None:
+            return None
+        return (int(pair[0]) - 3, int(pair[1]) - 3)
+
     # Playbook — это «полный набор», не отдельный слот: иначе HSS дублируется.
-    if hss.get("enabled", True) or pb.get("enabled"):
+    if (hss.get("enabled", True) or pb.get("enabled")) and hss.get("crypto_enabled", False):
         around = bool(hss.get("all_day") or hss_24h)
-        sess = None if around else tuple(hss.get("session") or (16, 19))
-        add("HSS", sess)
+        raw = hss.get("session") or (16, 19)
+        add("HSS", None if around else utc3_to_utc(raw))
     if lsr.get("enabled", True) or pb.get("enabled"):
-        add("London S/R", (16, 19))
+        add("London S/R", utc3_to_utc(lsr.get("ny") or (16, 23)))
     if flow.get("enabled", True) or pb.get("enabled"):
         add("Flow", None)
     if sq.get("enabled"):

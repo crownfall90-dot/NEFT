@@ -18,8 +18,9 @@ from neft.core.strategy import Bar, ClosedTrade, Signal, Strategy
 @dataclass
 class Costs:
     spread_points: float = 1.0        # если 0 в истории — берём это значение
-    commission_per_lot: float = 0.0   # $ за лот, тейкер (вход всегда, SL/stop_out на выходе)
-    commission_maker_per_lot: float = 0.0  # $ за лот, мейкер (TP выходит лимитом — дешевле)
+    commission_per_lot: float = 0.0   # $ за лот на входе (тейкер / Bybit open)
+    commission_maker_per_lot: float = 0.0  # $ за лот, мейкер (TP на крипте)
+    commission_on_close: bool = True  # False = Bybit TradFi: комиссия только open
     contract_size: float = 100_000.0
     point: float = 1e-05
     leverage: int = 500
@@ -49,6 +50,8 @@ class Position:
     margin: float
     opened_at: int
     opened_time: object = None
+    signal_reason: str = ""
+    signal_at: object = None
 
 
 @dataclass
@@ -84,6 +87,9 @@ class Backtester:
         direction = 1 if pos.side is Side.BUY else -1
         gross = (exit_price - pos.entry) * direction * pos.volume * self.costs.contract_size
         entry_fee = self.costs.commission_per_lot * pos.volume
+        if not self.costs.commission_on_close:
+            # Bybit TradFi: комиссия списывается при открытии.
+            return gross - entry_fee
         exit_rate = (self.costs.commission_maker_per_lot if reason == "tp"
                      else self.costs.commission_per_lot)
         return gross - entry_fee - exit_rate * pos.volume
@@ -106,8 +112,21 @@ class Backtester:
             bar = Bar(row.time, row.open, row.high, row.low, row.close, row.spread,
                       index=i, volume=getattr(row, "tick_volume", 0.0))
 
-            # 1. Сопровождение открытой позиции: проверяем SL/TP внутри бара.
+            # 1. Сопровождение открытой позиции: trailing/BE, затем SL/TP.
             if pos is not None:
+                upd = self.strategy.manage_position(
+                    bar, pos.side, pos.entry, pos.sl, pos.tp,
+                )
+                if upd is not None:
+                    new_sl, new_tp = upd
+                    # только ужесточаем SL (не отдаём риск обратно)
+                    if pos.side is Side.BUY:
+                        pos.sl = max(pos.sl, float(new_sl))
+                        pos.tp = float(new_tp)
+                    else:
+                        pos.sl = min(pos.sl, float(new_sl))
+                        pos.tp = float(new_tp)
+
                 hit_sl = row.low <= pos.sl if pos.side is Side.BUY else row.high >= pos.sl
                 hit_tp = row.high >= pos.tp if pos.side is Side.BUY else row.low <= pos.tp
                 exit_price = reason = None
@@ -124,6 +143,9 @@ class Backtester:
                         exit=exit_price, pnl=pnl, reason=reason,
                         bars_held=i - pos.opened_at,
                         opened_at=pos.opened_time, closed_at=row.time,
+                        sl=pos.sl, tp=pos.tp,
+                        signal_reason=pos.signal_reason,
+                        signal_at=pos.signal_at,
                     )
                     trades.append(trade)
                     self.strategy.on_trade_closed(trade)
@@ -169,9 +191,14 @@ class Backtester:
                             pending = None
                             continue
                     margin = sig.volume * c.contract_size * abs(entry) / c.leverage
-                    pos = Position(side=sig.side, volume=sig.volume, entry=entry,
-                                   sl=sl, tp=tp, margin=margin, opened_at=i,
-                                   opened_time=row.time)
+                    sig_bar = df.iloc[pending.placed_at]
+                    pos = Position(
+                        side=sig.side, volume=sig.volume, entry=entry,
+                        sl=sl, tp=tp, margin=margin, opened_at=i,
+                        opened_time=row.time,
+                        signal_reason=getattr(sig, "reason", "") or "",
+                        signal_at=sig_bar.time,
+                    )
                     pending = None
                 elif i >= pending.expires_at:
                     pending = None
@@ -193,6 +220,9 @@ class Backtester:
                     exit=row.close, pnl=equity - balance, reason="stop_out",
                     bars_held=i - pos.opened_at,
                     opened_at=pos.opened_time, closed_at=row.time,
+                    sl=pos.sl, tp=pos.tp,
+                    signal_reason=pos.signal_reason,
+                    signal_at=pos.signal_at,
                 ))
                 pos = None
                 ruined, ruin_time = True, row.time
@@ -233,6 +263,8 @@ class Backtester:
                     side=signal.side, volume=signal.volume, entry=entry,
                     sl=signal.sl, tp=signal.tp, margin=margin, opened_at=i,
                     opened_time=row.time,
+                    signal_reason=signal.reason or "",
+                    signal_at=row.time,
                 )
 
         idx = df["time"].iloc[: len(equity_curve)]

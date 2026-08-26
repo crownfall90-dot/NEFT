@@ -1,4 +1,4 @@
-"""Фильтр по новостям: не входить в сделку рядом с плановым релизом.
+"""Фильтр по новостям и календарь для новостного бота.
 
 Источник — публичный недельный фид ForexFactory (nfs.faireconomy.media),
 годами используемый тысячами MT5/MQL5-индикаторов для этой же задачи.
@@ -12,8 +12,11 @@
 меняется от сделки к сделке, и держать его в коде дешевле, быстрее и
 воспроизводимее, чем звать модель в реальном времени на каждый бар.
 """
+from __future__ import annotations
+
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -52,6 +55,8 @@ FEEDS = {"this": "https://nfs.faireconomy.media/ff_calendar_thisweek.json"}
 # Золото: почти монопричинно реагирует на USD (ставки ФРС, реальная
 # доходность, CPI, NFP) — остальные валюты для него шум.
 #
+# Нефть (Brent/WTI): USD-актив; High-impact по USD двигает risk/commodity.
+#
 # Крипта: коррелирует с USD-ликвидностью (ставки ФРС, CPI, NFP двигают
 # аппетит к риску), реакция на данные отдельных стран (GBP CPI, AUD
 # занятость) статистически не отличима от нуля. Разметка по нюансам
@@ -61,8 +66,9 @@ INSTRUMENT_CURRENCIES: dict[str, list[str]] = {
     "NAS100": ["USD"], "DJ30": ["USD"], "US500": ["USD"],
     "GER40": ["EUR", "USD"], "FRA40": ["EUR", "USD"], "ES35": ["EUR", "USD"],
     "UK100": ["GBP", "USD"], "CHINA50": ["CNY", "USD"],
-    # металл
+    # металл / нефть
     "XAUUSD+": ["USD"], "XAUUSD": ["USD"],
+    "UKOUSD": ["USD"], "USOUSD": ["USD"],
     # форекс — обе ноги пары
     "EURUSD+": ["EUR", "USD"], "GBPUSD+": ["GBP", "USD"],
     "USDJPY+": ["USD", "JPY"], "AUDUSD+": ["AUD", "USD"],
@@ -74,12 +80,33 @@ INSTRUMENT_CURRENCIES: dict[str, list[str]] = {
 # Крипта: единая привязка к USD для всех пар вида "*/USDT:USDT".
 CRYPTO_CURRENCIES = ["USD"]
 
+_NUM_RE = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
+
 
 def currencies_for(instrument: str) -> list[str]:
     if instrument in INSTRUMENT_CURRENCIES:
         return INSTRUMENT_CURRENCIES[instrument]
+    # брокерские суффиксы (.f, .m, …) и канон через алиасы
+    base = instrument.split(".")[0]
+    if base.endswith("+") or base in INSTRUMENT_CURRENCIES:
+        hit = currencies_for(base) if base != instrument else []
+        if hit:
+            return hit
+    base2 = instrument[:-1] if instrument.endswith("+") else instrument
+    for key, curs in INSTRUMENT_CURRENCIES.items():
+        if key == base2 or key.rstrip("+") == base2 or key == base2 + "+":
+            return curs
+        if key.split(".")[0] == base or key.rstrip("+") == base:
+            return curs
     if "/USDT" in instrument or instrument.endswith("USDT"):
         return CRYPTO_CURRENCIES
+    try:
+        from neft.core.mt5_symbols import canonical
+        can = canonical(instrument)
+        if can != instrument and can in INSTRUMENT_CURRENCIES:
+            return INSTRUMENT_CURRENCIES[can]
+    except Exception:
+        pass
     return []
 
 
@@ -89,6 +116,48 @@ class Event:
     currency: str
     impact: str
     title: str
+    forecast: str = ""
+    previous: str = ""
+    actual: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.time.isoformat()}|{self.currency}|{self.title}"
+
+
+def _parse_number(raw: str | float | int | None) -> float | None:
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    s = str(raw).strip()
+    if not s or s in ("-", "—", "n/a", "N/A", "null"):
+        return None
+    # "2.5%" / "250K" / "1,234.5" — берём первое число
+    m = _NUM_RE.search(s.replace(",", ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except ValueError:
+        return None
+
+
+def surprise(event: Event) -> float | None:
+    """Знак/сила actual−forecast. None — цифр нет, торгуем только по цене."""
+    act = _parse_number(event.actual)
+    fc = _parse_number(event.forecast)
+    if act is None or fc is None:
+        return None
+    return act - fc
+
+
+def has_material_surprise(event: Event, min_abs: float = 0.0) -> bool | None:
+    """True/False если есть цифры; None — actual/forecast ещё нет."""
+    s = surprise(event)
+    if s is None:
+        return None
+    return abs(s) >= min_abs
 
 
 def _fetch_feed(url: str, retries: int = 3) -> list[dict]:
@@ -108,11 +177,10 @@ def _fetch_feed(url: str, retries: int = 3) -> list[dict]:
 
 
 def load_calendar(refresh: bool = False, max_age_hours: float = 12.0) -> list[Event]:
-    """Календарь этой и следующей недели, с кэшем на диск.
+    """Календарь этой недели, с кэшем на диск.
 
-    Источник обновляется нечасто (расписание известно заранее), поэтому
-    кэш на несколько часов не теряет актуальности, а живых запросов
-    в торговом цикле не требует вовсе.
+    Для риск-гейта хватает кэша на часы. Новостной бот рядом с релизом
+    передаёт max_age_hours≈0.02 (≈1 мин), чтобы подтянуть actual.
     """
     if CACHE.exists() and not refresh:
         age_h = (time.time() - CACHE.stat().st_mtime) / 3600
@@ -141,16 +209,69 @@ def _parse(raw: list[dict]) -> list[Event]:
             t = pd.Timestamp(e["date"]).tz_convert("UTC").tz_localize(None)
         except Exception:
             continue
-        out.append(Event(time=t, currency=e.get("country", ""),
-                         impact=e.get("impact", "Low"), title=e.get("title", "")))
+        out.append(Event(
+            time=t,
+            currency=e.get("country", "") or "",
+            impact=e.get("impact", "Low") or "Low",
+            title=e.get("title", "") or "",
+            forecast=str(e.get("forecast") or ""),
+            previous=str(e.get("previous") or ""),
+            actual=str(e.get("actual") or ""),
+        ))
     return sorted(out, key=lambda x: x.time)
+
+
+def events_for_instrument(
+    events: list[Event],
+    instrument: str,
+    *,
+    impacts: tuple[str, ...] = ("High",),
+) -> list[Event]:
+    curs = set(currencies_for(instrument))
+    if not curs:
+        return []
+    want = set(impacts)
+    return [e for e in events if e.impact in want and e.currency in curs]
+
+
+def upcoming_high(
+    events: list[Event],
+    instrument: str,
+    when_utc: pd.Timestamp,
+    *,
+    ahead_minutes: float = 180.0,
+    behind_minutes: float = 0.0,
+) -> list[Event]:
+    """High-impact события по валютам инструмента в окне вокруг now."""
+    lo = when_utc - pd.Timedelta(minutes=behind_minutes)
+    hi = when_utc + pd.Timedelta(minutes=ahead_minutes)
+    return [
+        e for e in events_for_instrument(events, instrument)
+        if lo <= e.time <= hi
+    ]
+
+
+def near_high_event(
+    events: list[Event],
+    when_utc: pd.Timestamp,
+    *,
+    window_minutes: float = 30.0,
+) -> bool:
+    """Есть ли любой High-релиз в ±window — для частого обновления кэша."""
+    w = pd.Timedelta(minutes=window_minutes)
+    for e in events:
+        if e.impact != "High":
+            continue
+        if abs(when_utc - e.time) <= w:
+            return True
+    return False
 
 
 class NewsGate:
     """Проверка «не идёт ли сейчас окно вокруг важной новости по инструменту»."""
 
     def __init__(self, buffer_minutes: int = 5, impacts: tuple[str, ...] = ("High",),
-                events: list[Event] | None = None):
+                 events: list[Event] | None = None):
         self.buffer = pd.Timedelta(minutes=buffer_minutes)
         self.impacts = set(impacts)
         self.events = events if events is not None else load_calendar()
@@ -205,7 +326,7 @@ class NewsGate:
         return frac, f"{e.currency} {e.title} {side} {mins}м"
 
     def upcoming(self, instrument: str, from_utc: pd.Timestamp,
-                horizon_hours: float = 168) -> list[Event]:
+                 horizon_hours: float = 168) -> list[Event]:
         curs = set(currencies_for(instrument))
         end = from_utc + pd.Timedelta(hours=horizon_hours)
         return [e for e in self.events if e.currency in curs and e.impact in self.impacts

@@ -15,6 +15,7 @@ import webbrowser
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
@@ -29,8 +30,8 @@ from neft.core.config import ROOT, settings
 from neft.core.panel_guard import (
     BODY_MAX, LOGIN_HTML, child_env, clear_session_headers, client_ok,
     csrf_ok, host_ok, issue_session, origin_ok, panel_token, rate_ok,
-    safe_dashboard, safe_klines, security_headers, session_ok,
-    set_session_headers, token_ok,
+    rotate_session_salt, safe_dashboard, safe_klines, security_headers,
+    session_ok, session_role, set_session_headers, token_ok, norm_tf,
 )
 from neft.core.tg_login import (
     consume as login_consume,
@@ -45,6 +46,7 @@ from neft.core.news_historical import FOMC_MEETING_DATES, FRED_RELEASES
 from neft.core.routing import (
     CRYPTO_ROUTES, CRYPTO_STARTER, CRYPTO_UNIVERSE, CRYPTO_WATCHLIST, ROUTES,
 )
+from neft.core.scanner import scanner_applies, trade_markets
 
 HOST, PORT = "127.0.0.1", 8787
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -53,6 +55,9 @@ LOG_DIR = ROOT / "logs"
 CONTROL = LOG_DIR / "bot_control.json"
 JOBS: dict[str, dict] = {}
 JOB_LOCK = threading.Lock()
+_KILL_SWEEP: threading.Thread | None = None
+_MOVERS_CACHE: dict = {}
+LAST_MT5_STATUS: dict = {"ok": True, "error": None}
 
 
 def read_control() -> dict:
@@ -236,7 +241,21 @@ def stop_jobs() -> None:
     # taskkill/PowerShell, реально ощутимая задержка (до пары секунд).
     # Клиенту это ждать незачем: ответ уже ушёл по факту terminate() выше,
     # подчистка донагоняет в фоне.
-    threading.Thread(target=_kill_script, args=("crypto_forward.py",), daemon=True).start()
+    #
+    # ВАЖНО: _kill_script бьёт по command line ("*crypto_forward.py*"), не
+    # по конкретному PID — он не отличает старый мёртвый процесс от только
+    # что запущенного нового. Быстрый Стоп -> Запуск (типичный сценарий,
+    # кнопки специально сделаны мгновенными) иначе может словить гонку:
+    # этот фоновый сметатель ещё работает, пока start_jobs() уже поднял
+    # свежий процесс — и убивает его тоже, тихо, без ошибки в панели.
+    # Поэтому start_jobs() обязан дождаться (join) предыдущий сметатель
+    # перед спавном — см. глобальный _KILL_SWEEP.
+    global _KILL_SWEEP
+    def _sweep() -> None:
+        _kill_script("crypto_forward.py")
+        _kill_script("news_forward.py")
+    _KILL_SWEEP = threading.Thread(target=_sweep, daemon=True)
+    _KILL_SWEEP.start()
 
 
 def _pid_alive(pid: int) -> bool:
@@ -361,9 +380,65 @@ def risk_for_mode(mode: str, cfg: dict) -> tuple[float, float]:
     )
 
 
-def start_jobs(mode: str, cfg: dict) -> list[str]:
+def mt5_cfd_preflight() -> dict:
+    """Проверка: открытый MT5 отдаёт NAS100 (Bybit CFD), до spawn forward."""
+    import MetaTrader5 as mt5
+    from neft.core import mt5_symbols as mt5sym
+    try:
+        if not mt5.initialize():
+            return {"ok": False, "error": f"MT5 не отвечает: {mt5.last_error()}"}
+        acc = mt5.account_info()
+        if acc is None:
+            return {"ok": False, "error": f"MT5: нет данных счёта ({mt5.last_error()})"}
+        server = acc.server or "?"
+        login = acc.login
+        got = mt5sym.resolve("NAS100", tradable_only=False)
+        if not got:
+            return {
+                "ok": False,
+                "error": (
+                    f"NAS100 нет на {server} (логин {login}). "
+                    "Откройте MT5 на Bybit-Live-7 — CFD Bybit есть только там, "
+                    "не MetaQuotes-Demo."
+                ),
+                "server": server,
+                "login": login,
+            }
+        return {
+            "ok": True, "error": None, "server": server,
+            "login": login, "nas100": got,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"MT5 preflight: {e}"}
+    finally:
+        try:
+            mt5.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def read_mt5_status_file() -> dict | None:
+    path = LOG_DIR / "mt5_status.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def start_jobs(mode: str, cfg: dict) -> dict:
+    """Старт venue-джоб. Возвращает {started, mt5}."""
+    global LAST_MT5_STATUS
     stop_jobs()
+    # stop_jobs() выше запускает СВОЙ фоновый kill-сметатель (см. его
+    # комментарий) — если он ещё не закончил, дожидаемся: иначе он может
+    # убить процесс, который мы вот-вот заспавним ниже (гонка по
+    # совпадению command line, не PID).
+    if _KILL_SWEEP is not None and _KILL_SWEEP.is_alive():
+        _KILL_SWEEP.join(timeout=5)
     _kill_script("crypto_forward.py")
+    _kill_script("news_forward.py")
     write_control(entries=True, paused=False)
     env = child_env(mode)
     acc = account_for_mode(cfg, mode)
@@ -378,6 +453,7 @@ def start_jobs(mode: str, cfg: dict) -> list[str]:
     venue = cfg.get("venue") or "crypto"
     flags = _flags_from_cfg(cfg)
     py = str(PY)
+    mt5_status: dict = {"ok": True, "error": None}
 
     def spawn(name: str, args: list[str]) -> None:
         logf = (LOG_DIR / f"admin_{name}.log").open("ab")
@@ -389,7 +465,8 @@ def start_jobs(mode: str, cfg: dict) -> list[str]:
         started.append(name)
 
     risk_pct, _daily = risk_for_mode(mode, cfg)
-    if venue in ("crypto", "both"):
+    run_crypto, run_mt5 = trade_markets(venue, cfg.get("scanner") or {})
+    if run_crypto:
         bal = acc.get("deposit", 1000) if mode != "live" else 1000
         cargs = ["scripts/crypto_forward.py",
                  "--mode", mode,
@@ -405,17 +482,58 @@ def start_jobs(mode: str, cfg: dict) -> list[str]:
             cargs.append("--no-news")
         spawn("crypto", cargs)
 
-    if venue in ("mt5", "both"):
-        margs = ["scripts/forward.py",
-                 "--symbols", ",".join(cfg.get("mt5_symbols") or ["EURUSD"]),
-                 "--leverage", str(cfg.get("leverage_mt5", 500)),
-                 *flags]
-        if mode == "paper":
-            margs.append("--paper")
-        elif mode == "live":
-            margs.append("--live")
-        spawn("mt5", margs)
-    return started
+    if run_mt5:
+        mt5_status = mt5_cfd_preflight()
+        LAST_MT5_STATUS = mt5_status
+        if mt5_status.get("ok"):
+            margs = ["scripts/forward.py",
+                     "--symbols", ",".join(cfg.get("mt5_symbols") or ["NAS100"]),
+                     "--leverage", str(cfg.get("leverage_mt5", 500)),
+                     *flags]
+            # Bybit CFD: демо-серверов нет. Режим «демо» в панели = paper на
+            # Live-котировках (NAS100 / XAUUSD+ / …), ордера в терминал не уходят.
+            if mode in ("paper", "demo"):
+                margs.append("--paper")
+            elif mode == "live":
+                margs.append("--live")
+            spawn("mt5", margs)
+        # иначе mt5 не стартуем — ошибка уйдёт в ответ /api/run и public_state
+
+    nb = cfg.get("news_bot") or {}
+    if nb.get("enabled"):
+        if mt5_status.get("ok") is False and run_mt5:
+            pass  # уже знаем, что MT5 мёртв
+        else:
+            if not run_mt5:
+                mt5_status = mt5_cfd_preflight()
+                LAST_MT5_STATUS = mt5_status
+            if mt5_status.get("ok"):
+                from neft.core import mt5_symbols as mt5sym
+                news_syms = nb.get("symbols") or list(mt5sym.CFD_SYMBOLS)
+                if not news_syms:
+                    news_syms = list(mt5sym.CFD_SYMBOLS)
+                news_risk = min(1.0, float(nb.get("risk_pct") or 1.0))
+                nargs = [
+                    "scripts/news_forward.py",
+                    "--symbols", ",".join(news_syms),
+                    "--leverage", str(cfg.get("leverage_mt5", 500)),
+                    "--risk", str(news_risk),
+                    "--balance", str(nb.get("deposit") or 1000),
+                    "--interval", str(max(5, float(acc.get("interval_sec", 5)))),
+                    "--rr", str(nb.get("rr") or 1.5),
+                    "--impulse-atr", str(nb.get("impulse_atr") or 0.8),
+                    "--pre-minutes", str(nb.get("pre_minutes") or 2),
+                    "--post-window", str(nb.get("post_window_min") or 15),
+                    "--daily", str(acc.get("max_daily_loss_pct") or 4),
+                    "--dd", str(acc.get("max_drawdown_pct") or 12),
+                ]
+                if mode in ("paper", "demo"):
+                    nargs.append("--paper")
+                elif mode == "live":
+                    nargs.append("--live")
+                spawn("news", nargs)
+
+    return {"started": started, "mt5": mt5_status}
 
 
 def _pump(proc: subprocess.Popen, logf) -> None:
@@ -908,21 +1026,47 @@ def scanner_snapshot() -> dict:
         "enabled": bool(cfg.get("enabled", True)),
         "top_k": int(cfg.get("top_k", 2)),
         "min_score": float(cfg.get("min_score", 1.2)),
+        "scope": str(cfg.get("scope") or "all"),
         "hot": [],
         "hits": [],
     }
+    running = {j.get("name") for j in inferred_jobs(jobs_snapshot()) if j.get("running")}
     # Бот выключен — файл со снимком сканера мог остаться от прошлого
     # запуска (никто его не чистит на стопе) и отдавать его как живой было
     # бы враньём: панель показывала бы "горячие" тикеры часами после стопа.
-    if not inferred_jobs(jobs_snapshot()):
+    if not running:
         return empty
-    path = ROOT / "logs" / "scanner_state.json"
-    if path.exists():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
-    return empty
+    out = dict(empty)
+    scope = str(cfg.get("scope") or "all")
+    # Крипта и CFD — два независимых процесса, каждый со своим файлом
+    # снимка (не гонять запись в один файл из двух процессов разом).
+    # Показываем только то, что реально сейчас работает и входит в scope.
+    if "crypto" in running and scanner_applies(scope, "crypto"):
+        path = ROOT / "logs" / "scanner_state.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                out.update({k: v for k, v in data.items() if k in ("enabled", "top_k", "min_score", "scope")})
+                out["hot"] = out["hot"] + (data.get("hot") or [])
+                out["hits"] = out["hits"] + (data.get("hits") or [])
+            except (json.JSONDecodeError, OSError):
+                pass
+    if "mt5" in running and scanner_applies(scope, "cfd"):
+        path = ROOT / "logs" / "mt5_scanner_state.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                out["hot"] = out["hot"] + (data.get("hot") or [])
+                out["hits"] = out["hits"] + (data.get("hits") or [])
+            except (json.JSONDecodeError, OSError):
+                pass
+    out["enabled"] = bool(cfg.get("enabled", True))
+    out["top_k"] = int(cfg.get("top_k", 2))
+    out["min_score"] = float(cfg.get("min_score", 1.2))
+    out["scope"] = scope
+    out["hits"].sort(key=lambda h: -(h.get("score") or 0))
+    out["hits"] = out["hits"][:16]
+    return out
 
 
 def _chart_open_positions(ch: dict) -> list[dict]:
@@ -1009,6 +1153,13 @@ def live_account_snapshot() -> dict:
 
 def public_state() -> dict:
     cfg = machine_config.load()
+    mt5_st = dict(LAST_MT5_STATUS) if LAST_MT5_STATUS else {"ok": True, "error": None}
+    file_st = read_mt5_status_file()
+    # Файл от forward свежее, если job уже писал статус после preflight.
+    if file_st and file_st.get("ts") and (
+            not mt5_st.get("ts") or str(file_st.get("ts")) >= str(mt5_st.get("ts") or "")):
+        if file_st.get("ok") is False or mt5_st.get("ok") is not False:
+            mt5_st = {**mt5_st, **file_st}
     return {
         "config": cfg,
         "crypto_testnet": bool(settings.crypto_testnet),
@@ -1023,6 +1174,7 @@ def public_state() -> dict:
         "jobs": inferred_jobs(jobs_snapshot()),
         "control": read_control(),
         "ready": live_checklist(),
+        "mt5_status": mt5_st,
         "strategies_meta": {
             "hss": {
                 "name": "HSS · Heikin Ashi scalp",
@@ -1068,24 +1220,73 @@ def public_state() -> dict:
                         "висят на каждой монете вселенной отдельно.",
             },
             "scanner": {
-                "name": "Сканер вселенной",
+                "name": "Сканер",
                 "file": "neft/core/scanner.py",
-                "tf": "1m + 5m",
-                "what": "BTC и ENA в бане. На каждом баре rank по HSS/Flow/LSR, "
-                        "в работу top-2. Монета не закреплена.",
+                "tf": "1m + 5m + 15m",
+                "what": "Считает оценку сетапа по каждой паре. В работу идут "
+                        "только top-K с оценкой ≥ порога. Рынок: все / крипта / CFD.",
             },
         },
     }
 
 
+_KLINE_CACHE: dict[str, tuple[float, list]] = {}
+_KLINE_LOCK = threading.Lock()
+
+
+def mt5_klines(symbol: str, tf: str, limit: int = 500) -> list[dict]:
+    """Свечи CFD/форекса из уже открытого терминала — те же ТФ, что на крипте."""
+    tf = norm_tf(tf) or "1m"
+    key = f"{symbol}|{tf}|{limit}"
+    now = time.time()
+    with _KLINE_LOCK:
+        hit = _KLINE_CACHE.get(key)
+        if hit and now - hit[0] < 2.0:
+            return hit[1]
+    import MetaTrader5 as mt5
+    from neft.core.mt5_symbols import resolve
+
+    tf_map = {
+        "1m": mt5.TIMEFRAME_M1, "5m": mt5.TIMEFRAME_M5, "15m": mt5.TIMEFRAME_M15,
+        "1h": mt5.TIMEFRAME_H1, "4h": mt5.TIMEFRAME_H4, "1d": mt5.TIMEFRAME_D1,
+    }
+    owned = mt5.terminal_info() is None
+    if owned and not mt5.initialize(**settings.mt5_kwargs()):
+        raise RuntimeError(f"MT5 не открыт: {mt5.last_error()}")
+    try:
+        name = resolve(symbol) or symbol
+        mt5.symbol_select(name, True)
+        mt5.copy_rates_from_pos(name, tf_map[tf], 0, 10)
+        rates = mt5.copy_rates_from_pos(name, tf_map[tf], 0, limit)
+        if rates is None or not len(rates):
+            raise RuntimeError(f"нет свечей {name} {tf}")
+        out = [{
+            "time": int(r["time"]),
+            "open": float(r["open"]), "high": float(r["high"]),
+            "low": float(r["low"]), "close": float(r["close"]),
+            "volume": float(r["tick_volume"]),
+        } for r in rates]
+        with _KLINE_LOCK:
+            _KLINE_CACHE[key] = (now, out)
+            if len(_KLINE_CACHE) > 80:
+                oldest = min(_KLINE_CACHE, key=lambda k: _KLINE_CACHE[k][0])
+                _KLINE_CACHE.pop(oldest, None)
+        return out
+    finally:
+        if owned:
+            mt5.shutdown()
+
+
 def public_klines(pair: str, tf: str, venue: str) -> list[dict]:
-    """Публичные свечи биржи для панели графика (как смена ТФ в TradingView)."""
+    """Публичные свечи для панели графика (как смена ТФ в TradingView)."""
+    tf = norm_tf(tf) or "1m"
+    if venue == "mt5":
+        return mt5_klines(pair, tf)
     coin = pair.upper().replace("/", "").replace(":USDT", "")
     if not coin.endswith("USDT"):
         coin += "USDT"
-    tf = tf.lower()
     if venue == "bybit":
-        iv = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D"}.get(tf, "1")
+        iv = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D"}[tf]
         url = ("https://api.bybit.com/v5/market/kline?category=linear"
                f"&symbol={coin}&interval={iv}&limit=500")
         raw = json.loads(urlopen(Request(url, headers={"User-Agent": "NEFT"}), timeout=12).read())
@@ -1098,13 +1299,34 @@ def public_klines(pair: str, tf: str, venue: str) -> list[dict]:
                 "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]),
             })
         return out
-    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval={tf}&limit=500"
+    iv = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}[tf]
+    url = f"https://fapi.binance.com/fapi/v1/klines?symbol={coin}&interval={iv}&limit=500"
     rows = json.loads(urlopen(Request(url, headers={"User-Agent": "NEFT"}), timeout=12).read())
     return [{
         "time": int(r[0] / 1000),
         "open": float(r[1]), "high": float(r[2]),
         "low": float(r[3]), "close": float(r[4]), "volume": float(r[5]),
     } for r in rows]
+
+
+def _get_json(url: str) -> dict:
+    """GET с разбором тела даже при HTTP-ошибке.
+
+    Bybit через свой CDN отдаёт на /v5/market/orderbook корректный JSON
+    (retCode:0, полный стакан), но со статусом 403 — urlopen в этом случае
+    бросает HTTPError, не читая тело, и панель показывала
+    "стакан: HTTP Error 403: Forbidden" при живых данных. Тело у HTTPError
+    читается тем же .read(), поэтому разбираем и его.
+    """
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NEFT)"})
+    try:
+        with urlopen(req, timeout=8) as r:
+            return json.loads(r.read())
+    except HTTPError as e:
+        body = e.read()
+        if not body:
+            raise
+        return json.loads(body)
 
 
 def public_orderbook(pair: str, venue: str) -> dict:
@@ -1115,13 +1337,13 @@ def public_orderbook(pair: str, venue: str) -> dict:
     if venue == "bybit":
         url = ("https://api.bybit.com/v5/market/orderbook?category=linear"
                f"&symbol={coin}&limit=25")
-        raw = json.loads(urlopen(Request(url, headers={"User-Agent": "NEFT"}), timeout=8).read())
+        raw = _get_json(url)
         res = raw.get("result") or {}
         bids = [[float(p), float(q)] for p, q in (res.get("b") or [])]
         asks = [[float(p), float(q)] for p, q in (res.get("a") or [])]
         return {"bids": bids, "asks": asks}
     url = f"https://fapi.binance.com/fapi/v1/depth?symbol={coin}&limit=20"
-    raw = json.loads(urlopen(Request(url, headers={"User-Agent": "NEFT"}), timeout=8).read())
+    raw = _get_json(url)
     bids = [[float(p), float(q)] for p, q in (raw.get("bids") or [])]
     asks = [[float(p), float(q)] for p, q in (raw.get("asks") or [])]
     return {"bids": bids, "asks": asks}
@@ -1222,6 +1444,10 @@ class Handler(BaseHTTPRequestHandler):
                            "application/json")
                 return
             pair, _tf, venue = chk
+            if venue == "mt5":
+                self._send(200, _json({"ok": True, "bids": [], "asks": []}),
+                           "application/json")
+                return
             try:
                 ob = public_orderbook(pair, venue)
                 self._send(200, _json({"ok": True, **ob}), "application/json")
@@ -1229,15 +1455,148 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _json({"ok": False, "error": str(e), "bids": [], "asks": []}),
                            "application/json")
             return
+        # Отчёт HSS: localhost уже отфильтрован _gate — без логина,
+        # иначе страница зависает на fetch JSON при протухшей сессии.
+        if path in ("/hss_sweep_m5", "/hss_sweep_m5.html",
+                    "/dashboard/hss_sweep_m5.html"):
+            f = safe_dashboard("hss_sweep_m5.html")
+            if f:
+                self._send(200, f.read_bytes(), "text/html")
+                return
+        if path in ("/hss_sweep_m5.json", "/dashboard/hss_sweep_m5.json"):
+            f = safe_dashboard("hss_sweep_m5.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report", "/hss_report.html",
+                    "/dashboard/hss_report.html",
+                    "/hss_report_m5", "/hss_report_m5.html",
+                    "/dashboard/hss_report_m5.html",
+                    "/hss_report_m15", "/hss_report_m15.html",
+                    "/dashboard/hss_report_m15.html",
+                    "/hss_report_h1", "/hss_report_h1.html",
+                    "/dashboard/hss_report_h1.html",
+                    "/hss_report_btc_m5", "/hss_report_btc_m5.html",
+                    "/dashboard/hss_report_btc_m5.html",
+                    "/hss_report_btc_m15", "/hss_report_btc_m15.html",
+                    "/dashboard/hss_report_btc_m15.html",
+                    "/hss_report_btc_h1", "/hss_report_btc_h1.html",
+                    "/dashboard/hss_report_btc_h1.html"):
+            f = safe_dashboard("hss_report.html")
+            if f:
+                self._send(200, f.read_bytes(), "text/html")
+                return
+        if path in ("/hss_report.json", "/dashboard/hss_report.json"):
+            f = safe_dashboard("hss_report.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_m5.json", "/dashboard/hss_report_m5.json"):
+            f = safe_dashboard("hss_report_m5.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_m15.json", "/dashboard/hss_report_m15.json"):
+            f = safe_dashboard("hss_report_m15.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_h1.json", "/dashboard/hss_report_h1.json"):
+            f = safe_dashboard("hss_report_h1.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_btc_m5.json", "/dashboard/hss_report_btc_m5.json"):
+            f = safe_dashboard("hss_report_btc_m5.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_btc_m15.json", "/dashboard/hss_report_btc_m15.json"):
+            f = safe_dashboard("hss_report_btc_m15.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_btc_h1.json", "/dashboard/hss_report_btc_h1.json"):
+            f = safe_dashboard("hss_report_btc_h1.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_btc_compare.json", "/dashboard/hss_btc_compare.json"):
+            f = safe_dashboard("hss_btc_compare.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_tf_compare.json", "/dashboard/hss_tf_compare.json"):
+            f = safe_dashboard("hss_tf_compare.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_session_compare", "/hss_session_compare.html",
+                    "/dashboard/hss_session_compare.html"):
+            f = safe_dashboard("hss_session_compare.html")
+            if f:
+                self._send(200, f.read_bytes(), "text/html")
+                return
+        if path in ("/hss_session_compare.json", "/dashboard/hss_session_compare.json"):
+            f = safe_dashboard("hss_session_compare.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_m5_sess1119.json", "/dashboard/hss_report_m5_sess1119.json"):
+            f = safe_dashboard("hss_report_m5_sess1119.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path in ("/hss_report_m5_sess1619.json", "/dashboard/hss_report_m5_sess1619.json"):
+            f = safe_dashboard("hss_report_m5_sess1619.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        for _sess in ("hss_charts_m5_sess1119", "hss_charts_m5_sess1619"):
+            if path.startswith(f"/{_sess}/") or path.startswith(f"/dashboard/{_sess}/"):
+                rel = path.split(f"/{_sess}/", 1)[-1]
+                f = safe_dashboard(f"{_sess}/" + rel.lstrip("/"))
+                if f:
+                    self._send(200, f.read_bytes(), "application/json")
+                    return
+        if path.startswith("/hss_charts_btc_m5/") or path.startswith("/dashboard/hss_charts_btc_m5/"):
+            rel = path.split("/hss_charts_btc_m5/", 1)[-1]
+            f = safe_dashboard("hss_charts_btc_m5/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts_btc_m15/") or path.startswith("/dashboard/hss_charts_btc_m15/"):
+            rel = path.split("/hss_charts_btc_m15/", 1)[-1]
+            f = safe_dashboard("hss_charts_btc_m15/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts_btc_h1/") or path.startswith("/dashboard/hss_charts_btc_h1/"):
+            rel = path.split("/hss_charts_btc_h1/", 1)[-1]
+            f = safe_dashboard("hss_charts_btc_h1/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts_m5/") or path.startswith("/dashboard/hss_charts_m5/"):
+            rel = path.split("/hss_charts_m5/", 1)[-1]
+            f = safe_dashboard("hss_charts_m5/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts_m15/") or path.startswith("/dashboard/hss_charts_m15/"):
+            rel = path.split("/hss_charts_m15/", 1)[-1]
+            f = safe_dashboard("hss_charts_m15/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts_h1/") or path.startswith("/dashboard/hss_charts_h1/"):
+            rel = path.split("/hss_charts_h1/", 1)[-1]
+            f = safe_dashboard("hss_charts_h1/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path.startswith("/hss_charts/") or path.startswith("/dashboard/hss_charts/"):
+            rel = path.split("/hss_charts/", 1)[-1]
+            f = safe_dashboard("hss_charts/" + rel.lstrip("/"))
+            if f:
+                self._send(200, f.read_bytes(), "application/json")
+                return
+        if path == "/lightweight-charts.js":
+            f = safe_dashboard("lightweight-charts.js")
+            self._send(200, f.read_bytes() if f else b"", "text/javascript")
+            return
         if not self._need_sess():
             return
         if path in ("/", "/admin", "/admin/", "/chart", "/chart.html"):
             html = ADMIN_HTML.read_text(encoding="utf-8")
             self._send(200, html.encode("utf-8"), "text/html")
-            return
-        if path == "/lightweight-charts.js":
-            f = safe_dashboard("lightweight-charts.js")
-            self._send(200, f.read_bytes() if f else b"", "text/javascript")
             return
         if path == "/panel-boot.js":
             f = safe_dashboard("panel-boot.js")
@@ -1245,6 +1604,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/crypto_chart.json":
             f = safe_dashboard("crypto_chart.json")
+            self._send(200, f.read_bytes() if f else b"{}", "application/json")
+            return
+        if path == "/mt5_chart.json":
+            f = safe_dashboard("mt5_chart.json")
             self._send(200, f.read_bytes() if f else b"{}", "application/json")
             return
         if path.startswith("/dashboard/"):
@@ -1257,6 +1620,26 @@ class Handler(BaseHTTPRequestHandler):
                 return
         if path == "/api/state":
             self._send(200, _json(public_state()), "application/json")
+            return
+        if path == "/api/movers":
+            # Живой топ Bybit за 24ч для выбора пар в панели: обороты,
+            # рост, падение. Только чтение с публичного API, кэш на минуту —
+            # список меняется медленно, дёргать биржу на каждый клик незачем.
+            now = time.time()
+            cached = _MOVERS_CACHE.get("data")
+            if cached and now - _MOVERS_CACHE.get("ts", 0) < 60:
+                self._send(200, _json(cached), "application/json")
+                return
+            try:
+                from scripts.crypto_movers import rank as movers_rank
+
+                data = {"ok": True, **movers_rank(12)}
+                _MOVERS_CACHE["data"] = data
+                _MOVERS_CACHE["ts"] = now
+            except Exception as e:  # noqa: BLE001
+                data = {"ok": False, "error": str(e),
+                        "volume": [], "gainers": [], "losers": []}
+            self._send(200, _json(data), "application/json")
             return
         if path == "/api/news":
             try:
@@ -1329,7 +1712,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(403, _json({"ok": False, "error": "неверный код"}),
                            "application/json")
                 return
-            sess = issue_session()
+            # Код из data/panel_token знает только владелец — вход по нему
+            # всегда полный.
+            sess = issue_session("owner")
             self._send(200, _json({"ok": True}), "application/json", session=sess)
             return
         if path == "/api/login/telegram":
@@ -1364,12 +1749,13 @@ class Handler(BaseHTTPRequestHandler):
                            "application/json")
                 return
             cid = str(body.get("id") or "")
-            if not login_consume(cid):
+            role = login_consume(cid)
+            if not role:
                 self._send(403, _json({"ok": False, "error": "не подтверждено или истекло"}),
                            "application/json")
                 return
-            sess = issue_session()
-            self._send(200, _json({"ok": True}), "application/json", session=sess)
+            sess = issue_session(role)
+            self._send(200, _json({"ok": True, "role": role}), "application/json", session=sess)
             return
         if path == "/api/logout":
             self._send(200, _json({"ok": True}), "application/json", clear_sess=True)
@@ -1399,6 +1785,48 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/paper/drop":
             self._send(200, _json(drop_paper_book()), "application/json")
+            return
+        if path == "/api/panic":
+            # Аварийный сброс с любого устройства: остановить бота, снять
+            # бумажные позиции и разлогинить ВСЕ сессии (включая эту).
+            # Реальные биржевые позиции не трогаем — их закрывает биржа по
+            # SL/TP, а слепо крыть чужой ордер рынком отсюда опаснее, чем
+            # оставить: об этом честно сообщаем в ответе.
+            # Только владелец: приглашённый (trader) не должен мочь одним
+            # кликом выкинуть владельца из его же панели.
+            if session_role(self) != "owner":
+                self._send(403, _json({"ok": False, "error": "доступно только владельцу"}),
+                           "application/json")
+                return
+            result = {"ok": True, "stopped": False, "dropped": 0, "live_note": ""}
+            try:
+                write_control(entries=True, paused=False)
+                stop_jobs()
+                result["stopped"] = True
+            except Exception as e:  # noqa: BLE001
+                result["stop_error"] = str(e)
+            chart_p = ROOT / "dashboard" / "crypto_chart.json"
+            live_mode = False
+            if chart_p.exists():
+                try:
+                    live_mode = json.loads(chart_p.read_text(encoding="utf-8")).get("mode") == "live"
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if live_mode:
+                result["live_note"] = ("боевой режим: биржевые позиции остались "
+                                       "под своими SL/TP — закройте их на Bybit")
+            else:
+                try:
+                    result["dropped"] = drop_paper_book().get("dropped", 0)
+                except Exception as e:  # noqa: BLE001
+                    result["drop_error"] = str(e)
+            try:
+                rotate_session_salt()
+                result["sessions_revoked"] = True
+            except Exception as e:  # noqa: BLE001
+                result["sessions_revoked"] = False
+                result["salt_error"] = str(e)
+            self._send(200, _json(result), "application/json", clear_sess=True)
             return
         if path == "/api/paper/reset":
             self._send(200, _json(reset_paper_equity(body.get("mode"))), "application/json")
@@ -1443,6 +1871,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             cfg = machine_config.load()
             if mode == "live":
+                # Приглашённые (роль trader) видят и жмут только Тест/Демо
+                # в интерфейсе — но это не защита сама по себе, реальную
+                # проверку делаем здесь, на сервере, по подписанной роли
+                # сессии.
+                if session_role(self) != "owner":
+                    self._send(403, _json({
+                        "ok": False,
+                        "error": "боевой режим включает только владелец аккаунта",
+                    }), "application/json")
+                    return
                 if settings.demo_only:
                     self._send(403, _json({
                         "ok": False,
@@ -1450,16 +1888,37 @@ class Handler(BaseHTTPRequestHandler):
                     }), "application/json")
                     return
                 venue = cfg.get("venue") or "crypto"
-                if venue in ("crypto", "both") and not (
+                want_crypto, _want_mt5 = trade_markets(venue, cfg.get("scanner") or {})
+                if want_crypto and not (
                         settings.binance_api_key or settings.bybit_api_key):
                     self._send(403, _json({
                         "ok": False,
                         "error": "Нет ключей Binance/Bybit в .env — на биржу ордер не уйдёт.",
                     }), "application/json")
                     return
-            started = start_jobs(mode, cfg)
-            self._send(200, _json({"ok": True, "started": started, "mode": mode,
-                                   "jobs": jobs_snapshot()}), "application/json")
+            started_info = start_jobs(mode, cfg)
+            started = started_info.get("started") or []
+            mt5_st = started_info.get("mt5") or {"ok": True}
+            mt5_err = None if mt5_st.get("ok") else (mt5_st.get("error") or "MT5 CFD недоступен")
+            if mt5_err and "crypto" not in started:
+                self._send(400, _json({
+                    "ok": False,
+                    "error": mt5_err,
+                    "mt5_error": mt5_err,
+                    "started": started,
+                    "jobs": jobs_snapshot(),
+                }), "application/json")
+                return
+            ok_msg_extra = {}
+            if mt5_err and "crypto" in started:
+                ok_msg_extra["mt5_warning"] = mt5_err
+                ok_msg_extra["mt5_error"] = mt5_err
+            self._send(200, _json({
+                "ok": True, "started": started, "mode": mode,
+                "jobs": jobs_snapshot(),
+                "mt5_status": mt5_st,
+                **ok_msg_extra,
+            }), "application/json")
             return
         self._send(404, b"not found", "text/plain")
 

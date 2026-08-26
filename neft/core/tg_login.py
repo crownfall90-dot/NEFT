@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from neft.core import tg_access
 from neft.core.config import ROOT, settings
 
 CHALLENGES_PATH = ROOT / "logs" / "panel_login.json"
@@ -18,7 +19,7 @@ DENY_COOLDOWN = 60
 TG_API = "https://api.telegram.org/bot{token}/{method}"
 
 
-def allowed_ids() -> set[int]:
+def owner_ids() -> set[int]:
     raw = " ,".join(
         x for x in (settings.telegram_allowed_ids, settings.telegram_chat_id) if x
     )
@@ -30,8 +31,22 @@ def allowed_ids() -> set[int]:
     return out
 
 
+def allowed_ids() -> set[int]:
+    """Кто может подтвердить вход в веб-панель: владелец + trader-гости.
+
+    viewer-приглашение сюда не входит — такой доступ только для просмотра
+    в самом Telegram-боте, панель для него закрыта.
+    """
+    trader_ids = {g["id"] for g in tg_access.guests() if g.get("role") == "trader"}
+    return owner_ids() | trader_ids
+
+
+def is_owner(uid: int) -> bool:
+    return uid in owner_ids()
+
+
 def tg_enabled() -> bool:
-    return bool(settings.telegram_bot_token) and bool(allowed_ids())
+    return bool(settings.telegram_bot_token) and bool(owner_ids())
 
 
 def _load() -> dict:
@@ -176,14 +191,16 @@ def decide(cid: str, approve: bool, tg_user: int) -> tuple[bool, str]:
     return True, "approved" if approve else "denied"
 
 
-def consume(cid: str) -> bool:
+def consume(cid: str) -> str | None:
+    """Погасить подтверждённый запрос входа. Возвращает роль: owner | trader."""
     data = _load()
     ch = data.get(str(cid or "").strip())
     if not ch or ch.get("status") != "approved":
-        return False
+        return None
     if float(ch.get("exp") or 0) < time.time():
-        return False
+        return None
     ch["status"] = "used"
     data[str(cid).strip()] = ch
     _save(data)
-    return True
+    who = int(ch.get("by") or 0)
+    return "owner" if is_owner(who) else "trader"

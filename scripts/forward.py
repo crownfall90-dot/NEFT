@@ -1,19 +1,20 @@
 """Форвард-тест ЕДИНОЙ МАШИНЫ (HSS + London S/R с маршрутизацией) на живом
 потоке. Отслеживает все инструменты сразу, статистика копится в журнал.
 
-Два режима, выбираются сами:
-  * demo   - счёт демонстрационный: отложенные стоп-ордера уходят в терминал,
-             SL/TP ведёт брокер. Проверяется весь путь, включая исполнение.
-  * paper  - счёт боевой (или флаг --paper): ордера НЕ отправляются, сделки
-             считаются по тем же правилам, что и в бэктесте. Живые котировки,
-             живой спред, нулевой риск.
+Режимы:
+  * demo   - демо-счёт брокера: отложенные стоп-ордера уходят в терминал.
+             У Bybit демо нет — панель «Демо» для MT5 запускает paper.
+  * paper  - ордера НЕ отправляются; сделки по правилам бэктеста на живых
+             котировках. Это безопасная проверка Bybit CFD (NAS100, …).
+  * live   - боевой счёт, нужен DEMO_ONLY=false и --live.
 
-    python scripts/forward.py                     # все инструменты машины
+    python scripts/forward.py --paper             # все CFD машины, без ордеров
     python scripts/forward.py --symbols NAS100,DJ30
-    python scripts/forward.py --report             # свод по накопленному журналу
+    python scripts/forward.py --report
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -32,6 +33,7 @@ from rich.table import Table
 from rich.text import Text
 
 from neft.core import symbols as symlib
+from neft.core import mt5_symbols as mt5sym
 from neft.core.config import settings
 from neft.core.machine_config import load as load_bot_cfg
 from neft.core.models import Side
@@ -39,6 +41,9 @@ from neft.core.portfolio import Portfolio
 from neft.core.news import NewsGate, load_calendar
 from neft.core.risk import RiskLimits, RiskManager
 from neft.core.routing import enabled_for, strategy_on
+from neft.core.scanner import (
+    allow_new_entries, rank_hits, scan_overlay, score_watcher, scanner_applies,
+)
 from neft.core.strategy import Bar, ClosedTrade
 from neft.strategies.london_sr import LondonSR
 from neft.strategies.scalp_ha import ScalpHA
@@ -47,14 +52,32 @@ con = Console()
 ROOT = Path(__file__).resolve().parents[1]
 JOURNAL = ROOT / "logs" / "forward.jsonl"
 STATE = ROOT / "logs" / "forward_state.json"
+STATUS = ROOT / "logs" / "mt5_status.json"
 LIVE_HTML = ROOT / "dashboard" / "live.html"
+CHART_JSON = ROOT / "dashboard" / "mt5_chart.json"
+SCAN_STATE = ROOT / "logs" / "mt5_scanner_state.json"
 _RICH = re.compile(r"\[/?[^\]]*\]")
 MAGIC = 20260821          # та же метка, что у market_order - это наши сделки
 PREPARE_BARS = 3000       # окно для EMA100, свингов London S/R и медианы бара
+HSS_TF_RULE = {"M1": None, "M5": "5min", "M15": "15min"}
 
-# Параметры единой машины — те же, что в scripts/machine.py. Форвард
-# отслеживает именно то, что показал бэктест, а не отдельно настроенный HSS.
-ALL_SYMBOLS = "NAS100,DJ30,GER40,EURUSD+,XAUUSD+"
+
+def _hss_cfg() -> dict:
+    return (load_bot_cfg().get("strategies") or {}).get("hss") or {}
+
+
+def _trade_bars(raw: pd.DataFrame, tf: str) -> pd.DataFrame:
+    """Торговый ТФ HSS: live тянет M1, стратегия может жить на M5."""
+    rule = HSS_TF_RULE.get(str(tf or "M1").upper())
+    if not rule:
+        return raw
+    from neft.backtest.data import resample_ohlc
+    return resample_ohlc(raw, rule)
+
+
+# Полный CFD-набор Bybit. У Bybit нет демо-серверов — проверка бота =
+# paper на Live-котировках (см. --paper / режим demo в панели).
+ALL_SYMBOLS = ",".join(mt5sym.CFD_SYMBOLS)
 
 
 def jlog(**rec) -> None:
@@ -62,6 +85,18 @@ def jlog(**rec) -> None:
     JOURNAL.parent.mkdir(exist_ok=True)
     with JOURNAL.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
+def write_mt5_status(*, ok: bool, error: str = "", **extra) -> None:
+    """Короткий статус для админки (preflight / падение без traceback в UI)."""
+    payload = {
+        "ok": ok,
+        "error": error or None,
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        **extra,
+    }
+    STATUS.parent.mkdir(exist_ok=True)
+    STATUS.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 @dataclass
@@ -128,6 +163,9 @@ class Watcher:
 
     def __init__(self, symbol: str, args, risk: RiskManager, state: SymbolState):
         self.symbol = symbol
+        hss_cfg = _hss_cfg()
+        self.hss_tf = str(hss_cfg.get("tf") or "M1").upper()
+        self.tf = {"M5": "5m", "M15": "15m"}.get(self.hss_tf, "1m")
         self.args = args
         self.risk = risk
         self.st = state
@@ -140,8 +178,14 @@ class Watcher:
         hss_sess = getattr(args, "hss_session_tuple", (16, 19))
         lon = getattr(args, "london_tuple", (11, 16))
         ny = getattr(args, "ny_tuple", (16, 23))
+        vol_mode = str(hss_cfg.get("vol_mode") or "min")
+        entry_mode = str(hss_cfg.get("entry_mode") or "stop")
+        match_doji = bool(hss_cfg.get("matching_doji")
+                          or hss_cfg.get("require_matching_doji"))
         self.hss = ScalpHA(rr=rr, pullback_bars=pb, session=hss_sess,
-                           vol_mode="min", vol_window=2, entry_mode="stop",
+                           vol_mode=vol_mode, vol_window=3, entry_mode=entry_mode,
+                           require_matching_doji=match_doji,
+                           ta_filter=str(hss_cfg.get("ta_filter") or "off"),
                            risk_pct=args.risk, risk_manager=risk, spec=self.spec)
         self.lsr = LondonSR(london=lon, ny=ny, min_rr=rr,
                             risk_pct=args.risk, risk_manager=risk, spec=self.spec)
@@ -166,7 +210,11 @@ class Watcher:
 
     def _pnl(self, side: str, entry: float, exit_: float, volume: float) -> float:
         d = 1 if side == Side.BUY.value else -1
-        return (exit_ - entry) * d * volume * self.spec.contract_size
+        gross = (exit_ - entry) * d * volume * self.spec.contract_size
+        # Bybit TradFi: комиссия при открытии ($/лот).
+        from neft.core.bybit_cfd_fees import commission_per_lot
+        fee = commission_per_lot(self.symbol) * volume
+        return gross - fee
 
     def poll(self, equity: float, live: bool) -> None:
         self._apply_panel()
@@ -175,7 +223,8 @@ class Watcher:
             self.last_err = "нет истории"
             return
         self.last_err = ""
-        prepared = self.strat.prepare(df).reset_index(drop=True)
+        trade = _trade_bars(df, self.hss_tf)
+        prepared = self.strat.prepare(trade).reset_index(drop=True)
         # Portfolio.prepare() возвращает СЫРОЙ df — признаки (EMA, doji,
         # чистый откат) лежат в self.hss.df с тем же индексом, готовит их
         # ScalpHA.prepare() внутри Portfolio.prepare().
@@ -211,9 +260,16 @@ class Watcher:
         owner = self.strat._owner.name if self.strat._owner else "?"
         if sig is None or in_pos:
             return
+        if not getattr(self, "hot", True):
+            self.st.rejected += 1
+            jlog(type="reject", symbol=self.symbol, strategy=owner, bar=str(row.time),
+                 why="сканер: инструмент не в топе / вне выбранного рынка")
+            self.strat.on_signal_rejected(sig, "сканер")
+            return
 
-        sl_dist = abs(sig.entry - sig.sl)
-        margin = sig.volume * self.spec.contract_size * abs(sig.entry) / self.args.leverage
+        entry_px = float(sig.entry) if sig.entry is not None else float(row.close)
+        sl_dist = abs(entry_px - sig.sl) if sig.sl is not None else 0.0
+        margin = sig.volume * self.spec.contract_size * abs(entry_px) / self.args.leverage
         ok, why = self.risk.approve(
             sig, equity=equity, free_margin=equity, required_margin=margin,
             open_positions=0, sl_distance=sl_dist,
@@ -223,17 +279,35 @@ class Watcher:
         if not ok:
             self.st.rejected += 1
             jlog(type="reject", symbol=self.symbol, strategy=owner, bar=str(row.time),
-                 why=why, volume=sig.volume, entry=sig.entry, sl=sig.sl)
+                 why=why, volume=sig.volume, entry=entry_px, sl=sig.sl)
             self.strat.on_signal_rejected(sig, why)
             return
 
-        expires = str(d.iloc[min(i + sig.expire_bars, len(d) - 1)].time)
         jlog(type="signal", symbol=self.symbol, strategy=owner, bar=str(row.time),
-             side=sig.side.value, volume=sig.volume, entry=sig.entry,
+             side=sig.side.value, volume=sig.volume, entry=entry_px,
              sl=sig.sl, tp=sig.tp,
              risk_pct=round(self.risk.trade_risk_pct(
                  sig.volume, sl_dist, equity, self.spec.contract_size), 2))
         self.st.owner = owner
+
+        if sig.entry_type == "market" or sig.entry is None:
+            spread = (row.spread or 1) * self._point()
+            buy = sig.side is Side.BUY
+            fill = float(row.close) + (spread if buy else -spread)
+            if live:
+                self._place_live_market(sig, fill)
+            else:
+                self.st.position = asdict(PaperPosition(
+                    side=sig.side.value, volume=sig.volume, entry=fill,
+                    sl=sig.sl, tp=sig.tp, opened_at=str(row.time),
+                    strategy=owner))
+                jlog(type="fill", mode="paper", symbol=self.symbol,
+                     strategy=owner, bar=str(row.time),
+                     side=sig.side.value, volume=sig.volume, entry=fill,
+                     sl=sig.sl, tp=sig.tp)
+            return
+
+        expires = str(d.iloc[min(i + sig.expire_bars, len(d) - 1)].time)
         if live:
             self._place_live(sig, expires)
         else:
@@ -302,6 +376,44 @@ class Watcher:
                      price=q["price"])
 
     # ── demo-режим: ордера уходят в терминал ─────────────────────────
+    def _place_live_market(self, sig, fill: float) -> None:
+        info = mt5.symbol_info(self.symbol)
+        vol = max(info.volume_min,
+                  min(round(round(sig.volume / info.volume_step) * info.volume_step, 8),
+                      info.volume_max))
+        tick = mt5.symbol_info_tick(self.symbol)
+        if tick is None:
+            self.st.rejected += 1
+            jlog(type="reject", mode="demo", symbol=self.symbol, why="нет котировки")
+            return
+        price = tick.ask if sig.side is Side.BUY else tick.bid
+        req = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": self.symbol,
+            "volume": vol,
+            "type": mt5.ORDER_TYPE_BUY if sig.side is Side.BUY else mt5.ORDER_TYPE_SELL,
+            "price": price,
+            "sl": round(sig.sl, info.digits),
+            "tp": round(sig.tp, info.digits),
+            "deviation": 20,
+            "magic": MAGIC,
+            "comment": "neft-fwd",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_RETURN,
+        }
+        res = mt5.order_send(req)
+        if res is None or res.retcode != mt5.TRADE_RETCODE_DONE:
+            why = (f"retcode={res.retcode} {res.comment}" if res
+                   else str(mt5.last_error()))
+            self.st.rejected += 1
+            jlog(type="reject", mode="demo", symbol=self.symbol, why=why)
+            return
+        self.st.pos_ticket = int(res.order or res.deal or 0)
+        self.st.pending = None
+        jlog(type="fill", mode="demo", symbol=self.symbol, strategy=self.st.owner,
+             ticket=self.st.pos_ticket, side=sig.side.value, volume=vol,
+             entry=fill, sl=sig.sl, tp=sig.tp)
+
     def _place_live(self, sig, expires: str) -> None:
         info = mt5.symbol_info(self.symbol)
         vol = max(info.volume_min,
@@ -413,7 +525,7 @@ class Watcher:
                     f"[red]{self.last_err or '...'}[/]"] + [""] * 7
         r = self.row
         tick = mt5.symbol_info_tick(self.symbol)
-        above = r.close > r.ema
+        above = (r.ha_close > r.ema) if hasattr(r, "ha_close") else (r.close > r.ema)
         col = "clean_bear" if above else "clean_bull"
         run = 0
         d = self.df
@@ -423,8 +535,12 @@ class Watcher:
             else:
                 break
         hour = r.time.hour
-        hss_lo, hss_hi = self.hss.session
-        hss_active = self.routes.get("HSS") and hss_lo <= hour < hss_hi
+        sess = self.hss.session
+        if not sess or not isinstance(sess, (tuple, list)) or len(sess) != 2:
+            hss_active = bool(self.routes.get("HSS"))  # 24/7 — сессия не ограничивает
+        else:
+            hss_lo, hss_hi = int(sess[0]), int(sess[1])
+            hss_active = self.routes.get("HSS") and hss_lo <= hour < hss_hi
         # London S/R формирует зоны в лондонскую сессию, но ВХОДИТ только
         # в окне self.lsr.ny — это и есть её реальное "рабочее" время.
         lsr_lo, lsr_hi = self.lsr.ny
@@ -515,6 +631,141 @@ def render(watchers: list[Watcher], mode: str, acc, balance: float,
 
 def _plain(s: str) -> str:
     return _RICH.sub("", str(s))
+
+
+def _mt5_bar_ts(t) -> int:
+    """MT5-сервер Bybit живёт в UTC+3 (та же особенность, что и у новостного
+    фильтра — см. utc_offset_hours=3.0 в main()), бар-время в терминале —
+    тоже. Панель показывает московское время как UTC+3 от честного UTC,
+    поэтому здесь вычитаем 3 часа: иначе график встал бы на 3 часа вперёд
+    настоящего момента."""
+    ts = pd.Timestamp(t) - pd.Timedelta(hours=3)
+    return int(ts.tz_localize("UTC").timestamp())
+
+
+def _mt5_write_atomic(path: Path, text: str, tries: int = 15) -> bool:
+    """Тот же приём, что в crypto_forward.py: панель читает файл, пока мы
+    пишем — Windows роняет прямую перезапись PermissionError."""
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+    except OSError:
+        return False
+    for _ in range(tries):
+        try:
+            os.replace(tmp, path)
+            return True
+        except PermissionError:
+            time.sleep(0.05)
+        except OSError:
+            break
+    try:
+        path.write_text(text, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def write_mt5_scan(hits, hot: set[tuple[str, str]]) -> None:
+    """Отдельный файл сканера для CFD (logs/mt5_scanner_state.json) — не
+    logs/scanner_state.json, тот же пишет crypto_forward.py в отдельном
+    процессе одновременно, и два независимых процесса на один файл — гонка
+    записи, кто последний, тот и победил. admin_server.py сливает оба файла
+    сам при отдаче панели."""
+    SCAN_STATE.parent.mkdir(exist_ok=True)
+    SCAN_STATE.write_text(json.dumps({
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "hot": [{
+            "symbol": h.symbol, "tf": h.tf, "strategy": h.strategy,
+            "score": round(h.score, 2), "why": h.why,
+        } for h in hits if (h.symbol, h.tf) in hot],
+        "hits": [{
+            "symbol": h.symbol, "tf": h.tf, "strategy": h.strategy,
+            "score": round(h.score, 2), "why": h.why,
+        } for h in sorted(hits, key=lambda x: -x.score)[:12]],
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def write_chart_json(watchers: list[Watcher], mode: str, equity: float,
+                     start: float, n: int) -> None:
+    """dashboard/mt5_chart.json — тот же формат книг, что и у крипты
+    (candles/ema/lines/position/pending), чтобы график и левая панель
+    пар переиспользовали существующий JS без отдельной ветки на venue.
+    Инструменты торгуются теми же стратегиями (HSS, London S/R) — просто
+    другой рынок и другой источник котировок (терминал, не биржевой REST).
+    """
+    books = []
+    positions = []
+    for w in watchers:
+        df = w.df
+        candles, ema, last = [], [], 0.0
+        if df is not None and len(df):
+            tail = df.tail(200)
+            candles = [{
+                "time": _mt5_bar_ts(r.time), "open": float(r.open),
+                "high": float(r.high), "low": float(r.low), "close": float(r.close),
+            } for r in tail.itertuples()]
+            if "ema" in tail.columns:
+                ema = [{"time": _mt5_bar_ts(r.time), "value": float(r.ema)}
+                      for r in tail.itertuples() if r.ema == r.ema]
+            last = float(tail.close.iloc[-1])
+        else:
+            tick = mt5.symbol_info_tick(w.symbol)
+            if tick and tick.bid:
+                last = float(tick.bid)
+        lines = []
+        setup = None
+        p = w.st.position
+        q = w.st.pending
+        if p:
+            setup = {**p, "price": p["entry"], "kind": "position"}
+        elif q:
+            setup = {**q, "price": q["price"], "kind": "pending"}
+        if setup:
+            entry = float(setup.get("entry") or setup.get("price") or 0)
+            sl = float(setup.get("sl") or 0)
+            tp = float(setup.get("tp") or 0)
+            if entry:
+                lines.append({"price": entry, "color": "#98989f",
+                              "title": "вход" if setup["kind"] == "position" else "ордер",
+                              "style": 0 if setup["kind"] == "position" else 2})
+            if sl:
+                lines.append({"price": sl, "color": "#ff453a", "title": "SL1", "style": 2})
+            if tp:
+                lines.append({"price": tp, "color": "#32d74b", "title": "TP1 · 100%", "style": 2})
+        status = "в позиции" if p else ("ордер" if q else (w.last_err or "рынок"))
+        try:
+            scan = scan_overlay(w) if df is not None and len(df) else {}
+        except Exception:  # noqa: BLE001
+            scan = {}
+        books.append({
+            "key": w.symbol, "label": w.symbol, "pair": w.symbol,
+            "venue": "mt5", "tf": "1m",
+            "last": last,
+            "strategies": [k for k, v in (w.routes or {}).items() if v],
+            "status": status, "err": w.last_err,
+            "pending": q, "position": p, "setup": setup,
+            "pnl": sum(w.st.trades), "pnl_open": None,
+            "trades": len(w.st.trades), "candles": candles, "ema": ema,
+            "lines": lines, "markers": [], "scan": scan,
+        })
+        if p:
+            positions.append({
+                "pair": w.symbol, "label": w.symbol, "tf": "1m", "venue": "mt5",
+                "side": p["side"], "entry": p["entry"], "sl": p["sl"], "tp": p["tp"],
+                "volume": p["volume"], "strategy": p.get("strategy"),
+                "contract_size": w.spec.contract_size,
+                "opened_at": p.get("opened_at"),
+            })
+    payload = {
+        "ts": datetime.now().isoformat(timespec="seconds"),
+        "n": n, "equity": equity, "start": start, "mode": mode,
+        "books": books,
+        "blot": {"positions": positions, "orders": [], "deals": []},
+    }
+    _mt5_write_atomic(CHART_JSON, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def write_live_panel(watchers: list[Watcher], mode: str, acc, balance: float,
@@ -687,18 +938,28 @@ def main() -> None:
         report()
         return
     if not mt5.initialize():  # только уже открытый терминал, второй не запускаем
-        con.print(f"[red]MT5 не отвечает: {mt5.last_error()}[/]")
-        return
+        err = f"MT5 не отвечает: {mt5.last_error()}"
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err)
+        raise SystemExit(2)
     acc = mt5.account_info()
+    if acc is None:
+        err = f"Нет данных счёта: {mt5.last_error()}"
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err)
+        mt5.shutdown()
+        raise SystemExit(2)
     term = mt5.terminal_info()
     is_demo = acc.trade_mode != 2
     from neft.core.config import settings
     if a.live:
         if settings.demo_only:
-            con.print("[red]DEMO_ONLY=true — боевые ордера заблокированы. "
-                      "Снимите предохранитель в админ-панели или в .env.[/]")
+            err = ("DEMO_ONLY=true — боевые ордера заблокированы. "
+                   "Снимите предохранитель в админ-панели или в .env.")
+            con.print(f"[red]{err}[/]")
+            write_mt5_status(ok=False, error=err, server=acc.server, login=acc.login)
             mt5.shutdown()
-            return
+            raise SystemExit(2)
         mode = "live" if not is_demo else "demo"
     elif is_demo and not a.paper:
         mode = "demo"
@@ -710,12 +971,19 @@ def main() -> None:
                   "режим. Включите кнопку 'Алготрейдинг' и перезапустите.[/]")
         mode, send = "paper", False
     if mode == "live" and not term.trade_allowed:
-        con.print("[red]Алготрейдинг выключен — боевые ордера не отправляю.[/]")
+        err = "Алготрейдинг выключен — боевые ордера не отправляю."
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err, server=acc.server, login=acc.login)
         mt5.shutdown()
-        return
+        raise SystemExit(2)
+    # Bybit CFD: демо-серверов нет. На Live без --live всегда paper —
+    # это и есть безопасная проверка бота по NAS100 / XAUUSD+ / ….
     if not is_demo and not a.paper and not a.live:
-        con.print(f"[yellow]Счёт {acc.login} ({acc.server}) боевой - ордера "
-                  f"заблокированы, иду бумажным режимом на живых котировках.[/]")
+        con.print(f"[yellow]Счёт {acc.login} ({acc.server}) боевой — ордера "
+                  f"заблокированы, бумажный режим на живых CFD-котировках.[/]")
+    if mt5sym.bybit_cfd_server(acc.server) and mode == "paper":
+        con.print("[dim]Bybit CFD: нет демо-сервера → проверка = paper на Live "
+                  "(реальные ордера не уходят).[/]")
 
     if a.reset and STATE.exists():
         STATE.unlink()
@@ -741,21 +1009,57 @@ def main() -> None:
             con.print(f"[yellow]Календарь новостей недоступен ({e}) - "
                       f"фильтр выключен на этот запуск[/]")
 
-    watchers = []
-    for s in [x.strip() for x in a.symbols.split(",") if x.strip()]:
-        if not mt5.symbol_select(s, True):
-            con.print(f"[red]{s}: нет у брокера - пропускаю[/]")
-            continue
-        info = mt5.symbol_info(s)
-        if mode == "demo" and info.trade_mode != mt5.SYMBOL_TRADE_MODE_FULL:
-            con.print(f"[red]{s}: торговля запрещена брокером - пропускаю[/]")
-            continue
-        st = SymbolState(**saved.get("symbols", {}).get(s, {}))
-        watchers.append(Watcher(s, a, risk, st))
-    if not watchers:
-        con.print("[red]Не осталось инструментов.[/]")
+    requested = [x.strip() for x in a.symbols.split(",") if x.strip()]
+    if "NAS100" not in requested:
+        requested.insert(0, "NAS100")
+    resolved, missing = mt5sym.resolve_many(
+        requested, tradable_only=(mode == "demo"))
+    for s in missing:
+        con.print(f"[red]{s}: нет у брокера - пропускаю[/]")
+    if not any(req == "NAS100" for req, _ in resolved):
+        err = (f"NAS100 нет на {acc.server} (логин {acc.login}). "
+               "Откройте MT5 на Bybit-Live-7 — CFD Bybit есть только там, "
+               "не MetaQuotes-Demo.")
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err, server=acc.server, login=acc.login,
+                         missing=missing)
         mt5.shutdown()
-        return
+        raise SystemExit(2)
+    if missing and not mt5sym.bybit_cfd_server(acc.server):
+        con.print(
+            f"[yellow]Счёт {acc.login} ({acc.server}) без части CFD. "
+            f"Для полного набора (NAS100, XAUUSD+, …) нужен Bybit-Live + paper.[/]"
+        )
+    watchers = []
+    for requested_name, broker_name in resolved:
+        if requested_name != broker_name:
+            con.print(f"[dim]{requested_name} → {broker_name}[/]")
+        st = SymbolState(**saved.get("symbols", {}).get(broker_name, {}))
+        if not st.trades and requested_name in saved.get("symbols", {}):
+            st = SymbolState(**saved["symbols"][requested_name])
+        watchers.append(Watcher(broker_name, a, risk, st))
+    if not watchers:
+        err = "Не осталось инструментов."
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err, server=acc.server, login=acc.login)
+        mt5.shutdown()
+        raise SystemExit(2)
+    if not any(mt5sym.canonical(w.symbol) == "NAS100" for w in watchers):
+        err = "В вотчерах нет NAS100 — останов."
+        con.print(f"[red]{err}[/]")
+        write_mt5_status(ok=False, error=err, server=acc.server, login=acc.login)
+        mt5.shutdown()
+        raise SystemExit(2)
+
+    write_mt5_status(
+        ok=True, server=acc.server, login=acc.login, mode=mode,
+        symbols=[w.symbol for w in watchers],
+    )
+    # Сразу отдать панели цены (тикер), не дожидаясь первого poll истории.
+    try:
+        write_chart_json(watchers, mode, balance, balance, 0)
+    except Exception as e:  # noqa: BLE001
+        jlog(type="error", symbol="chart_json", err=str(e))
 
     jlog(type="start", mode=mode, account=str(acc.login), server=acc.server,
          symbols=[w.symbol for w in watchers], risk=a.risk,
@@ -779,7 +1083,35 @@ def main() -> None:
                 equity = acc_now.equity if send else \
                     balance + sum(sum(w.st.trades) for w in watchers)
                 risk.update(equity)
+                bot = load_bot_cfg()
+                sc = bot.get("scanner") or {}
+                scope = str(sc.get("scope") or "all")
+                scan_enabled = bool(sc.get("enabled", True))
+                scan_on = scan_enabled and scanner_applies(scope, "cfd")
+                hot_syms: set[str] = set()
+                try:
+                    if scan_on:
+                        hits = []
+                        for w in watchers:
+                            hits.extend(score_watcher(w))
+                        ranked = rank_hits(
+                            hits,
+                            max(1, int(sc.get("top_k") or 3)),
+                            float(sc.get("min_score") or 1.2),
+                        )
+                        hot_syms = {h.symbol for h in ranked}
+                        write_mt5_scan(hits, {(h.symbol, h.tf) for h in ranked})
+                    else:
+                        write_mt5_scan([], set())
+                except Exception as e:  # noqa: BLE001
+                    jlog(type="error", symbol="mt5_scan", err=str(e))
                 for w in watchers:
+                    held = bool(w.st.position or w.st.pending
+                                or getattr(w.st, "pos_ticket", 0)
+                                or getattr(w.st, "ticket", 0))
+                    w.hot = allow_new_entries(
+                        scan_enabled, scope, "cfd",
+                        held=held, in_hot=w.symbol in hot_syms)
                     try:
                         w.poll(equity, live=send)
                     except Exception as e:                      # noqa: BLE001
@@ -787,12 +1119,19 @@ def main() -> None:
                         jlog(type="error", symbol=w.symbol, err=str(e))
                 cur = (balance + sum(sum(w.st.trades) for w in watchers)
                        if mode == "paper" else mt5.account_info().balance)
-                live.update(render(watchers, mode, acc, cur, n, a))
+                try:
+                    live.update(render(watchers, mode, acc, cur, n, a))
+                except Exception as e:  # noqa: BLE001
+                    jlog(type="error", symbol="render", err=str(e))
                 save_state({w.symbol: w.st for w in watchers}, balance)
                 try:
                     write_live_panel(watchers, mode, acc, cur, n, a)
-                except OSError:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    jlog(type="error", symbol="live_panel", err=str(e))
+                try:
+                    write_chart_json(watchers, mode, cur, balance, n)
+                except Exception as e:  # noqa: BLE001
+                    jlog(type="error", symbol="chart_json", err=str(e))
                 if risk.halted:
                     jlog(type="halt", why=risk.halt_reason)
                     con.print(f"[red]KILL-SWITCH: {risk.halt_reason}[/]")

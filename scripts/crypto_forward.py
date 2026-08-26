@@ -47,7 +47,9 @@ from neft.core.routing import (
     CRYPTO_ROUTES, CRYPTO_UNIVERSE, STRATEGY_TFS, banned, kit_from_config,
     strategy_on,
 )
-from neft.core.scanner import rank_hits, scan_overlay, score_watcher
+from neft.core.scanner import (
+    allow_new_entries, rank_hits, scan_overlay, score_watcher, scanner_applies,
+)
 from neft.core.strategy import Bar, ClosedTrade
 from neft.strategies.factory import crypto_strategy, label_for
 from scripts.compare_crypto import spec_for
@@ -208,6 +210,28 @@ def sl_why(strategy: str, reason: str = "") -> str:
     return reason or "по структуре этого сетапа"
 
 
+def rr_map_from_cfg(bot: dict) -> dict:
+    """R:R каждой стратегии из настроек панели.
+
+    У стратегий поле называется по-разному: у HSS/Breakout/Flow это "rr"
+    (цель = rr × риск), у London S/R и Squeeze — "min_rr" (порог, ниже
+    которого сделка не берётся). Для панели это одно и то же число
+    «сколько получаем на единицу риска», поэтому читаем оба имени.
+    """
+    st = (bot or {}).get("strategies") or {}
+    out: dict[str, float] = {}
+    for key in ("hss", "london_sr", "breakout", "squeeze", "session_flow"):
+        cfg = st.get(key) or {}
+        raw = cfg.get("rr", cfg.get("min_rr"))
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0:
+            out[key] = val
+    return out
+
+
 def price_ladder(entry: float, sl: float, tp: float, side: str) -> tuple[list[float], list[float]]:
     """Три стопа и три тейка от структурного SL и финального TP."""
     buy = str(side).lower() == "buy"
@@ -218,7 +242,13 @@ def price_ladder(entry: float, sl: float, tp: float, side: str) -> tuple[list[fl
     if risk <= 0:
         return [sl_f, sl_f, entry_f], [tp_f or entry_f] * 3
     tps = [entry_f + sign * risk * r for r in (0.6, 1.2, 1.8)]
-    if tp_f:
+    # Целевой TP стратегии берём только если он ДАЛЬШЕ второго уровня.
+    # Иначе лестница выстраивалась вверх ногами: у сделок с тесной целью
+    # (напр. ARB 1m: SL 0.95R против TP 0.36R) TP3 оказывался ближе входа,
+    # чем TP1, куски закрывались вплотную к цене входа и после комиссий
+    # уходили в минус — в Telegram это выглядело как "🎯 TP1 ... итог −0.45",
+    # то есть тейк-профит, закрывшийся убытком.
+    if tp_f and (tp_f - tps[1]) * sign > 0:
         tps[2] = tp_f
     sls = [sl_f, entry_f - sign * risk * 0.5, entry_f]
     return sls, tps
@@ -367,16 +397,30 @@ class SymbolState:
 
 
 def load_state() -> dict:
-    if STATE.exists():
+    if not STATE.exists():
+        return {}
+    try:
         return json.loads(STATE.read_text(encoding="utf-8"))
-    return {}
+    except (json.JSONDecodeError, OSError) as e:
+        # save_state() писала не атомарно — принудительный килл (панель
+        # шлёт TerminateProcess без grace period при "Стоп") ровно в
+        # момент записи оставлял битый/усечённый JSON, и следующий запуск
+        # падал тут же на старте, даже не начав торговать, а открытые
+        # позиции (если были) оставались вообще без софтверного контроля.
+        # Файл теперь пишется атомарно (см. write_atomic), но на случай
+        # повреждения по другой причине (диск, антивирус) — не падать,
+        # начать с чистого состояния и громко сказать об этом в журнал.
+        con.print(f"[red]crypto_forward_state.json повреждён, начинаю "
+                  f"с пустого состояния: {e}[/]")
+        jlog(type="error", symbol="state", err=f"corrupt state file: {e}")
+        return {}
 
 
 def save_state(states: dict, balance: float) -> None:
-    STATE.write_text(json.dumps(
+    write_atomic(STATE, json.dumps(
         {"balance": balance,
          "symbols": {k: asdict(v) for k, v in states.items()}},
-        ensure_ascii=False, indent=1), encoding="utf-8")
+        ensure_ascii=False, indent=1))
 
 
 def _orphan_fills_from_journal(limit: int = 8000) -> list[dict]:
@@ -612,12 +656,13 @@ class Watcher:
         self.route_names = []
         flow_cfg = getattr(args, "flow_cfg", None)
         rr = float(getattr(args, "rr", 1.0))
+        rr_by = getattr(args, "rr_by_strategy", None)
         pb = int(getattr(args, "pullback", 2))
         play = next((r for r in routes if r["strategy"] in ("Playbook", "All")), None)
         if play is not None:
             self.strat = crypto_strategy(
                 play, rr=rr, risk=args.risk, risk_manager=risk, spec=self.spec,
-                pullback=pb, flow=flow_cfg)
+                pullback=pb, flow=flow_cfg, rr_by_strategy=rr_by)
             self.route_names = [label_for({**play, "tf": tf})]
         else:
             for r in routes:
@@ -625,7 +670,7 @@ class Watcher:
                 self.route_names.append(name)
                 strat = crypto_strategy(
                     r, rr=rr, risk=args.risk, risk_manager=risk, spec=self.spec,
-                    pullback=pb, flow=flow_cfg)
+                    pullback=pb, flow=flow_cfg, rr_by_strategy=rr_by)
                 port.add(strat, name)
             self.strat = port
         self.hss = next((s.strategy for s in getattr(self.strat, "slots", [])
@@ -798,10 +843,14 @@ class Watcher:
         if mode in ("demo", "live"):
             side_ru = "покупка" if side == "buy" else "продажа"
             emoji = "🟢" if side == "buy" else "🔴"
+            risk_d = abs(fill - sls[0])
+            rr = (abs(tps[2] - fill) / risk_d) if risk_d > 0 else 0
             tg_notify(
                 f"{emoji} <b>Вход · {coin} {self.tf}</b>\n"
                 f"{side_ru} · {owner}\n"
-                f"цена {fill:g} · SL {sls[0]:g} · TP {tps[2]:g}"
+                f"цена {fill:g} · объём {volume:g}\n"
+                f"SL {sls[0]:g} · TP {tps[0]:g} / {tps[1]:g} / {tps[2]:g}\n"
+                f"R:R {rr:.2f}"
             )
         return True
 
@@ -836,12 +885,24 @@ class Watcher:
              remaining=round(left, 8) if keep and left > 1e-12 else 0)
         if mode in ("demo", "live"):
             label = _close_mark_label(reason, float(p["entry"]), exit_price)
-            emoji = "🎯" if label.startswith("TP") else ("⚪" if label == "BE" else "🛑")
+            # Эмодзи — по фактическому результату, а не по номеру уровня:
+            # "🎯 TP1 ... итог −0.45 $" читалось как успех, хотя это убыток.
+            if pnl > 0.005:
+                emoji = "🟩"
+            elif pnl < -0.005:
+                emoji = "🟥"
+            else:
+                emoji = "⬜"
             pnl_s = f"+{pnl:.2f}" if pnl >= 0 else f"{pnl:.2f}"
+            side_ru = "продажа" if p["side"] == "sell" else "покупка"
+            left_txt = (f"\nостаток {left:g}" if keep and left > 1e-12
+                        else "\nпозиция закрыта")
             tg_notify(
                 f"{emoji} <b>{label} · {coin} {self.tf}</b>\n"
-                f"{p.get('strategy','?')} · закрыто {volume:g}\n"
-                f"итог {pnl_s} $"
+                f"{side_ru} · {p.get('strategy','?')}\n"
+                f"{float(p['entry']):g} → {float(exit_price):g} · объём {volume:g}\n"
+                f"<b>итог {pnl_s} $</b> · комиссия {fee:.2f} $"
+                f"{left_txt}"
             )
         self.strat.on_trade_closed(ClosedTrade(
             side=Side(p["side"]), volume=volume, entry=p["entry"],
@@ -954,9 +1015,10 @@ class Watcher:
                     "0", "0.00", f"{self.st.expired}/{self.st.rejected}", "нет данных"]
         tick = self.feed.ticker(self.symbol)
         r = self.row
-        above = float(r.close) > float(r.ema) if "ema" in getattr(r, "index", []) or hasattr(r, "ema") else True
+        above = True
         try:
-            above = bool(r.close > r.ema)
+            px = float(r.ha_close) if "ha_close" in getattr(r, "index", []) else float(r.close)
+            above = bool(px > float(r.ema))
             is_doji = bool(r.is_doji)
             body = float(r.body_ratio)
         except Exception:  # noqa: BLE001
@@ -1026,17 +1088,24 @@ def _bar_ts_many(col) -> list[int]:
     return s.to_numpy(dtype="datetime64[s]").astype("int64").tolist()
 
 
-def _journal_all() -> list[dict]:
-    """Журнал целиком, разобранный один раз.
+def _journal_all(tail_lines: int = 1000) -> list[dict]:
+    """Хвост журнала, разобранный один раз за цикл.
 
     Раньше _journal_marks() читал и парсил весь файл заново для КАЖДОГО из 69
     наблюдателей — 69 чтений и десятки тысяч json.loads за круг, до 18 секунд
-    на запись панели. Читаем один раз за цикл и передаём готовые записи.
+    на запись панели. Читаем один раз за цикл — но и это разбирало ВЕСЬ
+    журнал целиком, а его никто не чистит: за недели "всегда включён" файл
+    растёт без ограничений, и json.loads на каждой строке истории повторялся
+    каждые 5-8 секунд бесконечно. Ни один потребитель (_journal_marks — до
+    400 строк, _recent_events — до 200) не смотрит дальше последних ~400
+    записей, так что парсим только хвост — стоимость больше не растёт с
+    возрастом бота.
     """
     if not JOURNAL.exists():
         return []
+    lines = JOURNAL.read_text(encoding="utf-8").splitlines()[-tail_lines:]
     rows: list[dict] = []
-    for line in JOURNAL.read_text(encoding="utf-8").splitlines():
+    for line in lines:
         try:
             rows.append(json.loads(line))
         except json.JSONDecodeError:
@@ -1529,12 +1598,16 @@ def refresh_panel(args, watchers, risk) -> None:
     mode = getattr(args, "mode", "paper")
     acc = account_for_mode(bot, mode)
     sc = bot.get("scanner") or {}
-    args.scanner_on = bool(sc.get("enabled", True))
+    args.scan_scope = str(sc.get("scope") or "all")
+    args.scanner_enabled = bool(sc.get("enabled", True))
+    args.scanner_on = (args.scanner_enabled
+                       and scanner_applies(args.scan_scope, "crypto"))
     args.scan_k = max(1, int(sc.get("top_k") or 2))
     args.scan_min = float(sc.get("min_score") or 1.2)
     args.risk = float(acc.get("risk_pct") or args.risk)
     args.leverage = int(acc.get("leverage_crypto") or args.leverage or 5)
     args.flow_cfg = bot.get("strategies", {}).get("session_flow") or args.flow_cfg
+    args.rr_by_strategy = rr_map_from_cfg(bot)
     st = bot.get("strategies") or {}
     if risk is not None:
         risk.limits.risk_per_trade_pct = args.risk
@@ -1556,6 +1629,7 @@ def write_scan(hits, hot: set[str], args) -> None:
         "enabled": bool(args.scanner_on),
         "top_k": args.scan_k,
         "min_score": args.scan_min,
+        "scope": getattr(args, "scan_scope", "all"),
         "tfs": ["1m", "5m", "15m"],
         "ts": datetime.now().isoformat(timespec="seconds"),
         "hot": [{
@@ -1623,8 +1697,12 @@ def main() -> None:
     lon = bot.get("strategies", {}).get("london_sr", {}).get("london") or bot.get("london") or [11, 16]
     a.london_tuple = (int(lon[0]), int(lon[1]))
     a.flow_cfg = bot.get("strategies", {}).get("session_flow") or {}
+    a.rr_by_strategy = rr_map_from_cfg(bot)
     scan_cfg = bot.get("scanner") or {"enabled": True, "top_k": 2, "min_score": 1.2}
-    a.scanner_on = bool(scan_cfg.get("enabled", True))
+    a.scan_scope = str(scan_cfg.get("scope") or "all")
+    a.scanner_enabled = bool(scan_cfg.get("enabled", True))
+    a.scanner_on = (a.scanner_enabled
+                    and scanner_applies(a.scan_scope, "crypto"))
     a.scan_k = int(scan_cfg.get("top_k", 2))
     a.scan_min = float(scan_cfg.get("min_score", 1.2))
     default_join = ",".join(CRYPTO_UNIVERSE)
@@ -1802,8 +1880,9 @@ def main() -> None:
                     w.book_open = open_n
                     w.free_margin = max(0.0, float(equity) - float(used_m))
                     w.allow_entries = allow
-                    w.hot = ((not a.scanner_on) or held
-                             or ((w.symbol, w.tf) in hot) or (not hits))
+                    w.hot = allow_new_entries(
+                        a.scanner_enabled, a.scan_scope, "crypto",
+                        held=held, in_hot=(w.symbol, w.tf) in hot)
                     try:
                         w.poll(equity)
                     except Exception as e:  # noqa: BLE001

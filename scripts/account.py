@@ -43,7 +43,7 @@ def breakout_trades(symbol, bars, risk, balance):
                         max_volume=100.0, max_daily_loss_pct=100.0,
                         max_drawdown_pct=100.0, min_free_margin_pct=0.0)
     rm = RiskManager(start_balance=balance, limits=limits)
-    strat = LondonBreakout(rr=BREAKOUT_RR.get(symbol, 1.5), risk_pct=risk,
+    strat = LondonBreakout(rr=BREAKOUT_RR.get(symbol, 2.0), risk_pct=risk,
                            risk_manager=rm, spec=spec)
     costs = Costs(spread_points=1.0, contract_size=spec.contract_size,
                   point=spec.point)
@@ -74,7 +74,7 @@ def trades_of(symbol, bars, risk, balance):
     flags = enabled_for(symbol)
     if flags.get("HSS", True):
         pf.add(ScalpHA(rr=1.0, pullback_bars=2, session=(16, 19), vol_mode="min",
-                       vol_window=2, entry_mode="stop",
+                       vol_window=3, entry_mode="stop",
                        risk_pct=risk, risk_manager=rm, spec=spec), "HSS")
     if flags.get("London S/R", True):
         pf.add(LondonSR(london=(11, 16), ny=(16, 23), min_rr=1.0,

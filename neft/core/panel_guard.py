@@ -17,7 +17,15 @@ TOKEN_PATH = ROOT / "data" / "panel_token"
 ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]"})
 LOOPBACK = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
 SAFE_TFS = frozenset({"1m", "5m", "15m", "1h", "4h", "1d"})
-SAFE_VENUE = frozenset({"binance", "bybit"})
+SAFE_VENUE = frozenset({"binance", "bybit", "mt5"})
+_TF_ALIAS = {
+    "1m": "1m", "m1": "1m",
+    "5m": "5m", "m5": "5m",
+    "15m": "15m", "m15": "15m",
+    "1h": "1h", "h1": "1h", "60m": "1h",
+    "4h": "4h", "h4": "4h", "240m": "4h",
+    "1d": "1d", "d1": "1d", "1day": "1d",
+}
 BODY_MAX = 64_000
 SESS_DAYS = 7
 _RATE: dict[str, list[float]] = {}
@@ -41,12 +49,12 @@ def boot_epoch() -> int:
     return _BOOT_EPOCH
 
 
-def _parse_session(blob: str) -> tuple[int, int, str, str] | None:
+def _parse_session(blob: str) -> tuple[int, int, str, str, str] | None:
     parts = blob.split(":")
-    if len(parts) != 4:
+    if len(parts) != 5:
         return None
     try:
-        return int(parts[0]), int(parts[1]), parts[2], parts[3]
+        return int(parts[0]), int(parts[1]), parts[2], parts[3], parts[4]
     except ValueError:
         return None
 
@@ -69,8 +77,43 @@ def panel_token() -> str:
     return tok
 
 
+SESSION_SALT_PATH = TOKEN_PATH.parent / "session_salt"
+
+
+def session_salt() -> str:
+    """Соль подписи сессий. Смена соли разлогинивает ВСЕ устройства разом.
+
+    Отдельно от panel_token: токен может быть задан в .env (ADMIN_PANEL_TOKEN)
+    и тогда неизменяем, а «выйти со всех устройств» должно работать всегда.
+    """
+    SESSION_SALT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if SESSION_SALT_PATH.exists():
+        got = SESSION_SALT_PATH.read_text(encoding="utf-8").strip()
+        if got:
+            return got
+    salt = secrets.token_urlsafe(16)
+    SESSION_SALT_PATH.write_text(salt + "\n", encoding="utf-8")
+    try:
+        os.chmod(SESSION_SALT_PATH, 0o600)
+    except OSError:
+        pass
+    return salt
+
+
+def rotate_session_salt() -> str:
+    """Новая соль — все выданные ранее сессии мгновенно недействительны."""
+    salt = secrets.token_urlsafe(16)
+    SESSION_SALT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_SALT_PATH.write_text(salt + "\n", encoding="utf-8")
+    try:
+        os.chmod(SESSION_SALT_PATH, 0o600)
+    except OSError:
+        pass
+    return salt
+
+
 def _mac(msg: str) -> str:
-    key = panel_token().encode("utf-8")
+    key = (panel_token() + "|" + session_salt()).encode("utf-8")
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
@@ -106,13 +149,27 @@ def cookies(handler) -> dict[str, str]:
     return out
 
 
-def issue_session() -> tuple[str, str, int]:
+def issue_session(role: str = "owner") -> tuple[str, str, int]:
+    """role — owner (вход по коду или подтверждение владельцем в Telegram)
+    либо trader (вошёл приглашённый с правом запуска тест/демо). Роль
+    подписана вместе со всей сессией — подделать её без ключа нельзя,
+    и именно на неё опирается запрет LIVE для не-владельца."""
     exp = int(time.time()) + SESS_DAYS * 86400
     boot = boot_epoch()
     nonce = secrets.token_hex(12)
     csrf = secrets.token_urlsafe(18)
-    payload = f"{exp}:{boot}:{nonce}:{csrf}"
+    role = role if role in ("owner", "trader") else "trader"
+    payload = f"{exp}:{boot}:{nonce}:{csrf}:{role}"
     return payload, _mac(payload), exp
+
+
+def session_role(handler) -> str | None:
+    """Роль текущей сессии, либо None если сессии нет/невалидна."""
+    if not session_ok(handler):
+        return None
+    c = cookies(handler)
+    parsed = _parse_session(c.get("neft_sess", ""))
+    return parsed[4] if parsed else None
 
 
 def session_ok(handler) -> bool:
@@ -123,7 +180,7 @@ def session_ok(handler) -> bool:
     parsed = _parse_session(blob)
     if not parsed:
         return False
-    exp, boot, _, _ = parsed
+    exp, boot, _, _, _ = parsed
     return exp > time.time() and boot == boot_epoch()
 
 
@@ -172,15 +229,35 @@ def safe_dashboard(rel: str) -> Path | None:
     return path if path.is_file() else None
 
 
+def norm_tf(tf: str | None) -> str:
+    """Панель: 1m. Бот/MT5: M1. Сканер: 5m. Всё сводим к одному виду."""
+    t = (tf or "1m").strip().lower().replace(" ", "")
+    return _TF_ALIAS.get(t, "")
+
+
 def safe_klines(pair: str, tf: str, venue: str) -> tuple[str, str, str] | None:
-    p = "".join(ch for ch in (pair or "").upper() if ch.isalnum())
-    if not p.endswith("USDT") or not (6 <= len(p) <= 16):
+    t = norm_tf(tf)
+    if t not in SAFE_TFS:
         return None
-    t = (tf or "1m").lower()
-    v = (venue or "binance").lower()
-    if t not in SAFE_TFS or v not in SAFE_VENUE:
+    src = pair or ""
+    if ".." in src or "\\" in src or src.startswith("/") or src.startswith("."):
         return None
-    return p, t, v
+    raw = src.strip().upper().replace("/", "").replace(":USDT", "")
+    plus = raw.endswith("+")
+    alnum = "".join(ch for ch in raw if ch.isalnum())
+    if not alnum or len(alnum) > 20:
+        return None
+    v = (venue or "").lower()
+    crypto = alnum.endswith("USDT") and 6 <= len(alnum) <= 20
+    if crypto:
+        if v not in ("binance", "bybit"):
+            v = "bybit"
+        return alnum, t, v
+    # CFD / форекс / индексы: NAS100, XAUUSD+, EURUSD+. Не крипта — не Bybit REST.
+    if not (3 <= len(alnum) <= 16):
+        return None
+    name = alnum + ("+" if plus else "")
+    return name, t, "mt5"
 
 
 def child_env(mode: str) -> dict[str, str]:
@@ -276,16 +353,10 @@ body{
   display:flex;align-items:center;justify-content:center;min-height:100%;
   background:var(--bg);
   background:
-    radial-gradient(ellipse 90% 55% at 50% -8%, rgba(10,132,255,.11) 0%, transparent 58%),
-    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(64,156,255,.06) 0%, transparent 55%),
+    radial-gradient(ellipse 90% 55% at 50% -8%, rgba(10,132,255,.16) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 50% at 100% 100%, rgba(90,200,250,.09) 0%, transparent 58%),
+    radial-gradient(ellipse 60% 45% at 0% 100%, rgba(64,156,255,.07) 0%, transparent 55%),
     linear-gradient(180deg, #050505 0%, #000 100%);
-}
-body::before{
-  content:"";position:fixed;inset:0;pointer-events:none;opacity:.35;
-  background-image:linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
-  background-size:48px 48px;
-  mask-image:radial-gradient(ellipse 70% 60% at 50% 42%, #000 20%, transparent 78%);
 }
 .login-wrap{position:relative;width:100%;max-width:440px;padding:20px;animation:in .55s var(--ease)}
 @keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}

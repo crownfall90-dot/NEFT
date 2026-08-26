@@ -41,7 +41,7 @@ def build(symbol, risk, use_hss, use_lsr, rr, min_rr, kill_dd):
     pf = Portfolio()
     if use_hss:
         pf.add(ScalpHA(rr=rr, pullback_bars=2, session=(16, 19), vol_mode="min",
-                       vol_window=2, entry_mode="stop",
+                       vol_window=3, entry_mode="stop",
                        risk_pct=risk, risk_manager=rm, spec=spec), "HSS")
     if use_lsr:
         pf.add(LondonSR(london=(11, 16), ny=(16, 23), min_rr=min_rr,

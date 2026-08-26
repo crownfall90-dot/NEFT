@@ -110,7 +110,7 @@ const sheets={
     <label>мин. score</label><input id="d_scan_min" type="number" step="0.1" value="${$("scan_min").value}">
     <p class="hint" id="d_scan_now"></p>
   </div>
-  <p class="hint">Галочка «вкл» — стратегия торгует. Сняли — бот её больше не берёт (на следующем цикле, без рестарта). Мартингейла нет.</p><div class="grid">
+  <p class="hint">Галочка «вкл» — стратегия торгует. Сняли — бот её больше не берёт (на следующем цикле, без рестарта).</p><div class="grid">
     <div class="card"><h4>HSS</h4>
       <label class="chk"><input type="checkbox" id="d_hss_on" ${$("hss_on").checked?"checked":""}> вкл</label>
       <label>ТФ</label><select id="d_hss_tf">${$("hss_tf").innerHTML}</select>

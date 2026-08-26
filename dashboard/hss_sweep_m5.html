@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HSS M5 · сравнение вариантов</title>
+<style>
+:root{
+  --bg:#0b0d10; --panel:#14181f; --line:#243041; --text:#eef2f7; --muted:#8b97a8;
+  --green:#3dd6c3; --red:#ff7b78; --ema:#c9a227;
+  --mono:ui-monospace,"SF Mono",Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans)}
+header{padding:18px 22px 12px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font:600 20px/1.2 var(--sans)}
+header .sub{color:var(--muted);margin:6px 0 0;font-size:13px}
+.kpis{display:flex;flex-wrap:wrap;gap:22px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+.kpis span{display:block;color:var(--muted);font-size:12px}
+.kpis b{font:600 18px/1.2 var(--mono)}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.wrap{padding:16px 22px 40px;overflow:auto}
+table{width:100%;border-collapse:collapse;font:13px/1.35 var(--mono)}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font:600 11px var(--sans);position:sticky;top:0;background:#151b24}
+tr.win{outline:1px solid rgba(201,162,39,.35);background:rgba(201,162,39,.1)}
+tr.wr{background:rgba(61,214,195,.06)}
+.hint{color:var(--muted);font:12px var(--sans);margin:10px 0 16px}
+a{color:var(--ema)}
+</style>
+</head>
+<body>
+<header>
+  <h1>HSS M5 · поиск лучшего варианта</h1>
+  <p class="sub" id="sub">загрузка…</p>
+</header>
+<section class="kpis" id="kpis"></section>
+<div class="wrap">
+  <p class="hint">★ — лучший Σ PnL (при ≥20 сделках). Бирюзовая строка — лучший винрейт при ≥30 сделках.
+    Графики победителя: <a href="/hss_report_m5.html">hss_report_m5.html</a></p>
+  <table>
+    <thead>
+      <tr>
+        <th>вариант</th><th>описание</th><th>R:R</th><th>сессия</th>
+        <th>симв.</th><th>сделок</th><th>WR%</th><th>Σ PnL</th>
+      </tr>
+    </thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+function cls(v){ return v>0?"pos":(v<0?"neg":""); }
+function money(v){ return (v>=0?"+$":"−$")+Math.abs(Number(v)).toFixed(2); }
+async function boot(){
+  const r = await fetch("/dashboard/hss_sweep_m5.json?t="+Date.now(), {credentials:"same-origin"});
+  if(!r.ok){ $("sub").textContent = "нет данных — python scripts/hss_m5_sweep.py"; return; }
+  const d = await r.json();
+  const w = d.winner_id, b = d.best_wr_id;
+  const winner = (d.experiments||[]).find(e=>e.id===w);
+  const s = winner && winner.summary || {};
+  $("sub").textContent = `M5 · ${d.days}д · депозит $${d.balance} · риск ${d.risk_pct}% · ${d.ts||""}`;
+  $("kpis").innerHTML = `
+    <div><span>победитель</span><b>${w||"—"}</b></div>
+    <div><span>сделок</span><b>${s.trades||0}</b></div>
+    <div><span>винрейт</span><b>${Number(s.win_rate||0).toFixed(1)}%</b></div>
+    <div><span>Σ PnL</span><b class="${cls(s.net_profit)}">${money(s.net_profit||0)}</b></div>
+    <div><span>лучший WR</span><b>${b||"—"}</b></div>`;
+  const rows = (d.experiments||[]).slice().sort((a,c)=> (c.summary.net_profit||0)-(a.summary.net_profit||0));
+  $("body").innerHTML = rows.map(e=>{
+    const m = e.summary||{}, p = e.params||{};
+    const clsRow = e.id===w ? "win" : (e.id===b ? "wr" : "");
+    return `<tr class="${clsRow}">
+      <td>${e.id}${e.id===w?" ★":""}</td>
+      <td style="font:12px var(--sans);text-align:left">${e.title||""}</td>
+      <td>1:${p.rr}</td><td>${p.session||""}</td>
+      <td>${m.symbols||0}</td><td>${m.trades||0}</td>
+      <td class="${m.win_rate>=40?'pos':'neg'}">${Number(m.win_rate||0).toFixed(1)}</td>
+      <td class="${cls(m.net_profit)}">${money(m.net_profit||0)}</td>
+    </tr>`;
+  }).join("");
+}
+boot();
+</script>
+</body>
+</html>
