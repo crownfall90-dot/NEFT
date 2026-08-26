@@ -2372,6 +2372,19 @@ const sheets={
     <button type="button" class="btn b-dim" onclick="pullStrat();save()">Сохранить</button>
   </div>
   <div class="card strat-card" style="margin-bottom:12px">
+    <h4>Бэктест CFD · 90 дней</h4>
+    <p class="strat-what">Прогон на всех CFD из конфига. Нужен открытый MT5 с историей M1.</p>
+    <div class="strat-fields">
+      <div class="full">
+        <label>стратегия</label>
+        <select id="d_bt_strat"></select>
+      </div>
+    </div>
+    <button type="button" class="btn" id="btnBacktest" onclick="runBacktest()">Бэктест 90д</button>
+    <p class="hint" id="bt_status" style="margin-top:8px"></p>
+    <a id="bt_report_link" href="/hss_report.html" target="_blank" rel="noopener" style="display:none;font-size:13px">Открыть отчёт с графиками →</a>
+  </div>
+  <div class="card strat-card" style="margin-bottom:12px">
     <h4>Сканер</h4>
     <p class="strat-what">Ищет живой сетап и пускает только лучшие на выбранном рынке. CFD — крипта не сканируется и не входит. Выкл — торгуются все пары выбранного рынка (крипта / MT5 / оба).</p>
     <label class="chk"><input type="checkbox" id="d_scan_on" ${$("scan_on").checked?"checked":""}> включён</label>
@@ -2706,6 +2719,70 @@ async function runLive(){
   }
 }
 window.runLive=runLive;
+let btPoll=null;
+function paintBacktestSelect(){
+  const sel=$("d_bt_strat");
+  if(!sel) return;
+  const keys=(S.cfd_strategies||Object.keys(S.strategies_meta||{}))
+    .filter(k=>k!=="scanner"&&k!=="playbook");
+  const cur=sel.value;
+  sel.innerHTML=keys.map(k=>{
+    const m=(S.strategies_meta||{})[k]||{};
+    return `<option value="${k}">${m.name||k}</option>`;
+  }).join("");
+  if(cur&&keys.includes(cur)) sel.value=cur;
+  else if(S.backtest&&S.backtest.strategy) sel.value=S.backtest.strategy;
+}
+function paintBacktestStatus(){
+  const st=$("bt_status"), link=$("bt_report_link"), btn=$("btnBacktest");
+  if(!st) return;
+  const bt=S.backtest||{};
+  if(bt.running){
+    st.textContent=`идёт: ${bt.strategy||"?"} · ${bt.days||90}д…`;
+    if(btn) btn.disabled=true;
+    if(link) link.style.display="none";
+    return;
+  }
+  if(btn) btn.disabled=false;
+  if(bt.error&&bt.finished){
+    st.textContent=`ошибка: ${bt.error}`;
+    if(link) link.style.display="none";
+  }else if(bt.has_report){
+    st.textContent=bt.finished
+      ?`готово · ${bt.strategy||"?"} · ${new Date(bt.finished).toLocaleString("ru")}`
+      :"есть сохранённый отчёт";
+    if(link){ link.style.display="inline"; link.href="/hss_report.html"; }
+  }else{
+    st.textContent="выберите стратегию и запустите";
+    if(link) link.style.display="none";
+  }
+}
+async function runBacktest(){
+  const key=($("d_bt_strat")||{}).value||"hss";
+  const st=$("bt_status");
+  if(st) st.textContent="запуск…";
+  try{
+    const r=await (await fetch("/api/backtest",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({strategy:key,days:90})})).json();
+    if(!r.ok){ if(st) st.textContent=r.error||"ошибка"; toast(r.error||"ошибка"); return; }
+    S.backtest=r;
+    paintBacktestStatus();
+    toast("бэктест запущен");
+    if(btPoll) clearInterval(btPoll);
+    btPoll=setInterval(async()=>{
+      try{
+        const snap=await (await fetch("/api/backtest")).json();
+        S.backtest=snap;
+        paintBacktestStatus();
+        if(!snap.running){
+          clearInterval(btPoll); btPoll=null;
+          toast(snap.error?"бэктест: ошибка":"бэктест готов");
+        }
+      }catch(e){}
+    },3000);
+  }catch(e){ if(st) st.textContent="не удалось запустить"; toast("не удалось запустить"); }
+}
+window.runBacktest=runBacktest;
 async function stopBot(){
   // Один клик — сразу полная остановка (сервер больше не переспрашивает
   // паузой). Обновляем интерфейс сразу по ответу, не дожидаясь следующего
@@ -2759,6 +2836,10 @@ async function jobs(){
     return;
   }
   authDeadStrikes=0;
+  if(s.backtest) S.backtest=s.backtest;
+  if(s.cfd_strategies) S.cfd_strategies=s.cfd_strategies;
+  if(s.strategies_meta) S.strategies_meta=s.strategies_meta;
+  if(sideId==="strat"){ paintBacktestSelect(); paintBacktestStatus(); }
   const job=activeJob(s.jobs||[]);
   const wantOn=!!job;
   if(wantOn){
@@ -2956,6 +3037,8 @@ function openSheet(id){
     $("d_bo_tf").value=$("bo_tf").value||"M5"; $("d_sq_tf").value=$("sq_tf").value||"M5";
     if($("d_flow_tf")) $("d_flow_tf").value=$("flow_tf").value||"5m";
     paintScanScope();
+    paintBacktestSelect();
+    paintBacktestStatus();
     const box=$("d_scan_now");
     if(box){
       const talk=scanTalk(lastScan||{}, botOnEffective());

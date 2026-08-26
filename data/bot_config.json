@@ -119,11 +119,11 @@
   "strategies": {
     "hss": {
       "enabled": true,
-      "rr": 1.2,
-      "tf": "M5",
+      "rr": 1.5,
+      "tf": "M1",
       "pullback": 2,
       "session": [
-        16,
+        10,
         19
       ],
       "all_day": false,
@@ -131,8 +131,53 @@
       "vol_mode": "min",
       "matching_doji": false,
       "ta_filter": "off",
-      "entry_mode": "stop",
+      "entry_mode": "market",
       "crypto_enabled": false
+    },
+    "sonik_pulse": {
+      "enabled": false,
+      "tf": "M1",
+      "sl_points": 2.5,
+      "tp_points": 4.0
+    },
+    "apex_shot": {
+      "enabled": false,
+      "tf": "M5",
+      "rr": 2.0,
+      "session": [15, 20]
+    },
+    "orb_pulse": {
+      "enabled": false,
+      "tf": "M5",
+      "rr": 1.8
+    },
+    "pulse_clip": {
+      "enabled": false,
+      "tf": "M5",
+      "session": [16, 20]
+    },
+    "vwap_snap": {
+      "enabled": false,
+      "tf": "M5",
+      "min_rr": 1.5,
+      "session": [16, 20]
+    },
+    "slow_tide": {
+      "enabled": false,
+      "tf": "M5",
+      "rr": 2.0,
+      "session": [15, 20]
+    },
+    "coil_break": {
+      "enabled": false,
+      "tf": "M5",
+      "rr": 1.7
+    },
+    "nano_fade": {
+      "enabled": false,
+      "tf": "M5",
+      "rr": 1.25,
+      "session": [16, 20]
     },
     "london_sr": {
       "enabled": false,

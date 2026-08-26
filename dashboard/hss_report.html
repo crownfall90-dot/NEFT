@@ -120,18 +120,13 @@ function detectPageTf(){
   return WANT_BTC ? "M5" : "M1";
 }
 const PAGE_TF = detectPageTf();
-const REPORT_BY_TF = WANT_BTC ? {
-  M1: "/dashboard/hss_report_btc_m5.json",
-  M5: "/dashboard/hss_report_btc_m5.json",
-  M15: "/dashboard/hss_report_btc_m15.json",
-  H1: "/dashboard/hss_report_btc_h1.json",
-} : {
-  M1: "/dashboard/hss_report.json",
-  M5: "/dashboard/hss_report_m5.json",
-  M15: "/dashboard/hss_report_m15.json",
-  H1: "/dashboard/hss_report_h1.json",
+const REPORT_BY_TF = {
+  M1: "/dashboard/backtest_report.json",
+  M5: "/dashboard/backtest_report.json",
+  M15: "/dashboard/backtest_report.json",
+  H1: "/dashboard/backtest_report.json",
 };
-const REPORT_URL = REPORT_BY_TF[PAGE_TF];
+const REPORT_URL = REPORT_BY_TF[PAGE_TF] || "/dashboard/backtest_report.json";
 let report = null, chartData = null, chart = null, series = null, emaSeries = null;
 let tf = "overview", useHa = true, useEma = true, _ro = null;
 let selectedTrade = -1, priceLines = [], slBandSeries = null, tpBandSeries = null, entryBandSeries = null;

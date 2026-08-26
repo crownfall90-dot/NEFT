@@ -13,6 +13,21 @@ data/crypto/
 data/*_cache.json
 data/session_salt
 dashboard/crypto_chart.json
+dashboard/backtest_report.json
+dashboard/hss_report.json
+dashboard/backtest_charts/
+dashboard/hss_charts*/
+dashboard/hss_report*.json
+dashboard/hss_*.json
+dashboard/hss_*.html
+dashboard/sonik_*
+dashboard/martingale_*
+dashboard/cfd_*
+dashboard/top3_*
+dashboard/original_cfd_*
+dashboard/news_pulse_report.*
+dashboard/mt5_chart.json
+logs/backtest_state.json
 
 # Локальные артефакты отладки браузера, не часть проекта.
 dashboard/_chrome-debug/

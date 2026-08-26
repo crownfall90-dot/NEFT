@@ -4,66 +4,65 @@
 Bybit через ccxt). Стратегия пишется один раз и работает на обеих — она общается
 только с интерфейсом `Broker` и не знает, что под ней.
 
+## Быстрый старт на новом ПК
+
+1. Клонируйте репозиторий и откройте папку проекта.
+2. Двойной клик **`setup.bat`** (или `powershell -File setup.ps1`).
+   - Создаёт `.venv`, ставит `requirements.txt`
+   - Копирует `.env.example` → `.env` (если `.env` ещё нет)
+   - Создаёт `logs/`, `data/crypto/`
+3. Проверьте в `.env` пути **`MT5_PATH`** и **`MT5_DEMO_PATH`** под вашу установку MT5.
+4. Запустите MT5, включите **Алготрейдинг**.
+5. **`start_neft_services.bat`** — панель и Telegram-бот.
+6. Откройте http://127.0.0.1:8787 — код входа в `data/panel_token` (создаётся при первом запуске).
+
+> `.env.example` содержит рабочие ключи владельца — репозиторий должен оставаться **приватным**.
+
+## Панель и бэктест CFD
+
+- **Стратегии** — включить/выключить HSS, SonikPulse, ApexShot и др.
+- **Бэктест 90д** — прогон на всех CFD из конфига (нужен MT5 с историей M1).
+- Отчёт с графиками: http://127.0.0.1:8787/hss_report.html
+
+CLI:
+
+```bash
+.venv\Scripts\python.exe scripts\strategy_backtest.py --strategy hss --days 90
+.venv\Scripts\python.exe scripts\strategy_backtest.py --strategy apex_shot --days 90
+```
+
 ## Структура
 
 ```
-neft/core/config.py       чтение .env
-neft/core/models.py       Quote, Account, Position, Side — общий язык площадок
-neft/core/broker.py       абстрактный интерфейс площадки
-neft/adapters/mt5_broker.py     MT5 (форекс/CFD)
-neft/adapters/crypto_broker.py  Binance / Bybit через ccxt
-scripts/check_connection.py     диагностика, ничего не торгует
+neft/strategies/          стратегии (HSS, SonikPulse, ApexShot, …)
+neft/strategies/cfd_factory.py   сборка CFD-стратегий для бэктеста
+scripts/strategy_backtest.py     бэктест 90д + отчёт
+scripts/admin_server.py          панель управления
+scripts/forward.py               live/paper CFD
+scripts/crypto_forward.py        live/paper крипта
+setup.bat / setup.ps1            установщик
+.env.example                     шаблон окружения (→ .env при setup)
+data/bot_config.json             настройки бота и стратегий
 ```
 
-## Установка
-
-Самый быстрый способ — двойной клик по `setup.bat` (или запуск из терминала):
-
-```bat
-setup.bat
-```
-
-Скрипт сам создаст `.venv`, поставит зависимости из `requirements.txt`,
-скопирует `.env.example` → `.env` (если его ещё нет — существующий не
-трогает) и откроет его в Блокноте, чтобы вписать ключи. Ничего не ломает
-при повторном запуске — можно гонять сколько угодно раз.
-
-После установки — панель:
-
-```bat
-start_neft_services.bat
-```
-
-Откроется на http://127.0.0.1:8787 (логин — код из `data/panel_token`,
-создаётся сам при первом запуске).
-
-### Вручную (если нужен контроль над каждым шагом)
+## Установка вручную
 
 ```bash
 python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-cp .env.example .env          # заполнить ключи
-./.venv/Scripts/python.exe scripts/check_connection.py
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env
+.venv\Scripts\python.exe scripts\check_connection.py
 ```
 
 ## Предохранители
 
 В `.env`:
 
-- `DEMO_ONLY=true` — бот откажется отправлять ордера на боевой счёт. Снимать
-  только после успешного прогона на демо.
-- `CRYPTO_TESTNET=true` — Binance/Bybit работают в песочнице. Ключи тестнета
-  отдельные: testnet.binance.vision и testnet.bybit.com, боевые там не подойдут.
+- `DEMO_ONLY=true` — бот откажется отправлять ордера на боевой счёт.
+- `CRYPTO_TESTNET=true` — Binance/Bybit в песочнице (отдельные ключи testnet).
 
-## Особенности Bybit CFD (проверено на счёте 6057723)
+## Bybit CFD
 
-- Демо-серверов у Bybit нет: терминал пишет `no demo/preliminary groups`.
-  Проверка бота по CFD (NAS100, XAUUSD+, …): терминал на **Bybit-Live**,
-  режим панели **Демо/Тест** (= paper, ордера не уходят). MetaQuotes-Demo
-  для отладки кода без Bybit-тикеров — не для полного CFD-набора.
-- Торгуются **только символы с `+`**: `XAUUSD+`, `EURUSD+`. Тикеры без плюса
-  видны в списке, но имеют `trade_mode=0` — брокер их заблокировал.
-- Счёт в режиме hedging, плечо 1:500, валюта `UST`.
-- После `symbol_select()` первый тик приходит с задержкой — адаптер ждёт его сам.
-- Кнопка **Алготрейдинг** в терминале должна быть включена, иначе `order_send`
-  вернёт отказ.
+- Демо-серверов у Bybit нет: CFD-тест = **paper** на Bybit-Live (ордера не уходят).
+- Торгуются символы с **`+`**: `XAUUSD+`, `EURUSD+`, `NAS100`, …
+- Кнопка **Алготрейдинг** в MT5 должна быть включена.

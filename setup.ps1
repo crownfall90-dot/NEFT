@@ -56,7 +56,7 @@ $needEnv = $false
 $envPath = Join-Path $Root ".env"
 if (-not (Test-Path $envPath)) {
     Copy-Item (Join-Path $Root ".env.example") $envPath
-    Say "[OK] Создан .env из шаблона — DEMO_ONLY=true, ключи биржи пустые." "Green"
+    Say "[OK] Создан .env из .env.example (ключи уже заполнены)." "Green"
     $needEnv = $true
 } else {
     Say "[OK] .env уже есть, не трогаю" "Green"
@@ -74,12 +74,8 @@ Write-Host "============================================" -ForegroundColor Cyan
 
 if ($needEnv) {
     Write-Host ""
-    Say "Перед запуском откройте .env и впишите свои ключи:" "Yellow"
-    Say "  - BYBIT_API_KEY / BYBIT_API_SECRET  (крипта)" "Yellow"
-    Say "  - MT5_LOGIN / MT5_PASSWORD / MT5_SERVER  (форекс/CFD, если нужно)" "Yellow"
-    Say "  - TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID  (уведомления, необязательно)" "Yellow"
-    Say "Пока ключей нет — бот всё равно запустится в ТЕСТ-режиме на живых" "Gray"
-    Say "котировках без ключей, DEMO_ONLY=true не даст уйти в бой по ошибке." "Gray"
+    Say "Создан .env из .env.example — проверьте пути MT5_PATH и MT5_DEMO_PATH" "Yellow"
+    Say "под вашу установку на этом ПК (остальное уже заполнено)." "Yellow"
     Write-Host ""
     Start-Process notepad $envPath
 }

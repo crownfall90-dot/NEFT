@@ -47,6 +47,7 @@ from neft.core.routing import (
     CRYPTO_ROUTES, CRYPTO_STARTER, CRYPTO_UNIVERSE, CRYPTO_WATCHLIST, ROUTES,
 )
 from neft.core.scanner import scanner_applies, trade_markets
+from neft.strategies.cfd_factory import CFD_CATALOG
 
 HOST, PORT = "127.0.0.1", 8787
 PY = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -58,6 +59,12 @@ JOB_LOCK = threading.Lock()
 _KILL_SWEEP: threading.Thread | None = None
 _MOVERS_CACHE: dict = {}
 LAST_MT5_STATUS: dict = {"ok": True, "error": None}
+BACKTEST_LOCK = threading.Lock()
+BACKTEST: dict = {
+    "running": False, "strategy": None, "days": 90,
+    "started": None, "finished": None, "error": None, "exit_code": None,
+}
+BACKTEST_STATE = LOG_DIR / "backtest_state.json"
 
 
 def read_control() -> dict:
@@ -1151,6 +1158,88 @@ def live_account_snapshot() -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def _load_backtest_state() -> None:
+    global BACKTEST
+    if not BACKTEST_STATE.exists():
+        return
+    try:
+        data = json.loads(BACKTEST_STATE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    with BACKTEST_LOCK:
+        BACKTEST.update({k: data.get(k) for k in BACKTEST if k != "proc"})
+        BACKTEST["running"] = False
+
+
+def _save_backtest_state() -> None:
+    LOG_DIR.mkdir(exist_ok=True)
+    snap = {k: v for k, v in BACKTEST.items() if k != "proc"}
+    BACKTEST_STATE.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
+
+
+def backtest_snapshot() -> dict:
+    with BACKTEST_LOCK:
+        snap = {k: v for k, v in BACKTEST.items() if k != "proc"}
+    report = ROOT / "dashboard" / "backtest_report.json"
+    snap["has_report"] = report.exists()
+    if report.exists():
+        try:
+            snap["report_ts"] = json.loads(report.read_text(encoding="utf-8")).get("ts")
+        except (json.JSONDecodeError, OSError):
+            snap["report_ts"] = None
+    return snap
+
+
+def _watch_backtest(proc: subprocess.Popen) -> None:
+    proc.wait()
+    with BACKTEST_LOCK:
+        BACKTEST["running"] = False
+        BACKTEST["finished"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        BACKTEST["exit_code"] = proc.returncode
+        if proc.returncode != 0:
+            BACKTEST["error"] = "ошибка — см. logs/admin_backtest.log"
+        else:
+            BACKTEST["error"] = None
+    _save_backtest_state()
+
+
+def start_backtest(strategy: str, days: int = 90) -> dict:
+    strategy = str(strategy or "hss").strip()
+    if strategy not in CFD_CATALOG:
+        return {"ok": False, "error": f"неизвестная стратегия: {strategy}"}
+    days = max(7, min(int(days or 90), 365))
+    with BACKTEST_LOCK:
+        if BACKTEST.get("running"):
+            snap = {k: v for k, v in BACKTEST.items() if k != "proc"}
+            return {"ok": False, "error": "бэктест уже идёт", **snap}
+        py = str(PY) if PY.exists() else sys.executable
+        LOG_DIR.mkdir(exist_ok=True)
+        logf = (LOG_DIR / "admin_backtest.log").open("ab")
+        kw = dict(cwd=str(ROOT), stdout=logf, stderr=subprocess.STDOUT)
+        if os.name == "nt":
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = subprocess.Popen(
+            [py, "scripts/strategy_backtest.py", "--strategy", strategy, "--days", str(days)],
+            **kw,
+        )
+        BACKTEST.update({
+            "running": True,
+            "strategy": strategy,
+            "days": days,
+            "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "finished": None,
+            "error": None,
+            "exit_code": None,
+        })
+        _save_backtest_state()
+        threading.Thread(target=_watch_backtest, args=(proc,), daemon=True).start()
+    return {"ok": True, **backtest_snapshot()}
+
+
+_load_backtest_state()
+
+
 def public_state() -> dict:
     cfg = machine_config.load()
     mt5_st = dict(LAST_MT5_STATUS) if LAST_MT5_STATUS else {"ok": True, "error": None}
@@ -1175,49 +1264,16 @@ def public_state() -> dict:
         "control": read_control(),
         "ready": live_checklist(),
         "mt5_status": mt5_st,
+        "backtest": backtest_snapshot(),
+        "cfd_strategies": list(CFD_CATALOG.keys()),
         "strategies_meta": {
-            "hss": {
-                "name": "HSS · Heikin Ashi scalp",
-                "file": "neft/strategies/scalp_ha.py",
-                "tf": "M1",
-                "what": "Тренд по EMA100, чистый откат, вход стопом на объёмной doji. "
-                        "Сигнал по HA, исполнение по реальной цене. RR фиксированный.",
-            },
-            "london_sr": {
-                "name": "London S/R",
-                "file": "neft/strategies/london_sr.py",
-                "tf": "M1 (крипта иногда M5)",
-                "what": "Хай/лоу лондонской сессии — уровни для Нью-Йорка. "
-                        "Вход после слома структуры. Цель — ближайший свинг, не фиксированный RR.",
-            },
-            "breakout": {
-                "name": "London Breakout",
-                "file": "neft/strategies/london_breakout.py",
-                "tf": "M5",
-                "what": "Бокс лондона, пробой после 09:30 ET, одна сделка в день, RR 1:1.5–1:2. "
-                        "В машине по умолчанию выключен, кроме маршрутов NAS100/GER40/EURUSD+.",
-            },
-            "squeeze": {
-                "name": "Squeeze",
-                "file": "neft/strategies/squeeze.py",
-                "tf": "M15 → M5",
-                "what": "Треугольник: lower highs + higher lows, 2 касания с каждой стороны. "
-                        "Вход на сломе свинга, не по линии. RR обычно ≥ 2:1. По умолчанию выключен.",
-            },
-            "session_flow": {
-                "name": "Flow · 6 сетапов 5m/15m",
-                "file": "neft/strategies/session_flow.py",
-                "tf": "5m / 15m",
-                "what": "Отдельно: asian_sweep, failed_orb, range_fade, vwap_reclaim, "
-                        "ema_pull, orb_follow. blend включает все и режет по режиму "
-                        "тренд/флет. Сессионные — только Нью-Йорк UTC.",
-            },
+            **{k: {**v, "tf": v.get("default_tf", "M5")} for k, v in CFD_CATALOG.items()},
             "playbook": {
                 "name": "Playbook · единая 5m",
                 "file": "neft/strategies/factory.py",
                 "tf": "5m",
                 "what": "Flow + London S/R. В сканере почти не нужен: те же куски "
-                        "висят на каждой монете вселенной отдельно.",
+                        "висят на каждой монете вселенности отдельно.",
             },
             "scanner": {
                 "name": "Сканер",
@@ -1621,6 +1677,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/state":
             self._send(200, _json(public_state()), "application/json")
             return
+        if path == "/api/backtest":
+            self._send(200, _json({"ok": True, **backtest_snapshot()}), "application/json")
+            return
         if path == "/api/movers":
             # Живой топ Bybit за 24ч для выбора пар в панели: обороты,
             # рост, падение. Только чтение с публичного API, кэш на минуту —
@@ -1919,6 +1978,17 @@ class Handler(BaseHTTPRequestHandler):
                 "mt5_status": mt5_st,
                 **ok_msg_extra,
             }), "application/json")
+            return
+        if path == "/api/backtest":
+            strat = str(body.get("strategy") or "hss").strip()
+            days = int(body.get("days") or 90)
+            if not rate_ok("backtest:" + strat, 3, 120):
+                self._send(429, _json({"ok": False, "error": "бэктест слишком часто"}),
+                           "application/json")
+                return
+            out = start_backtest(strat, days)
+            code = 200 if out.get("ok") else 400
+            self._send(code, _json(out), "application/json")
             return
         self._send(404, b"not found", "text/plain")
 
