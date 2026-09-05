@@ -78,12 +78,17 @@ def cmd_check(base: str, key: str | None) -> None:
 
 
 def find_updown(base: str, key: str | None, limit_pages: int = 12) -> list[dict]:
-    """Ищем активные BTC up/down рынки с коротким окном."""
+    """Ищем ОТКРЫТЫЕ крипто up/down рынки.
+
+    Без status=OPEN эндпоинт отдаёт архив (закрытые рынки прошлых месяцев),
+    а marketVariant=CRYPTO_UP_DOWN отсекает спорт и прочие шаблоны.
+    Пагинация тут first/after, а не limit/cursor.
+    """
     found, cursor, seen_ids, seen_cursors = [], None, set(), set()
     for _ in range(limit_pages):
-        p = {"limit": 100}
+        p = {"first": 100, "status": "OPEN", "marketVariant": "CRYPTO_UP_DOWN"}
         if cursor:
-            p["cursor"] = cursor
+            p["after"] = cursor
         r = get("/markets", base=base, key=key, **p)
         if r.status_code != 200:
             print(f"  /markets → {r.status_code}: {r.text[:200]}")
@@ -94,9 +99,7 @@ def find_updown(base: str, key: str | None, limit_pages: int = 12) -> list[dict]
             if mid in seen_ids:
                 continue
             seen_ids.add(mid)
-            slug = (m.get("categorySlug") or "") + " " + (m.get("question") or "")
-            if "up-down" in slug.lower() or "up or down" in slug.lower():
-                found.append(m)
+            found.append(m)
         cursor = j.get("cursor")
         # курсор может повторяться — тогда пагинация зациклилась
         if not cursor or cursor in seen_cursors:
@@ -107,27 +110,28 @@ def find_updown(base: str, key: str | None, limit_pages: int = 12) -> list[dict]
 
 def cmd_markets(base: str, key: str | None) -> None:
     ms = find_updown(base, key)
-    print(f"найдено up/down рынков: {len(ms)}\n")
-    now = datetime.now(timezone.utc)
+    print(f"открытых крипто up/down рынков: {len(ms)}\n")
     rows = []
     for m in ms:
         outs = {o["name"]: o for o in m.get("outcomes", [])}
         up, dn = outs.get("Up", {}), outs.get("Down", {})
+        slug = m.get("categorySlug") or ""
         rows.append({
-            "id": m.get("id"),
-            "slug": (m.get("categorySlug") or "")[:46],
+            "id": m.get("id"), "slug": slug,
+            "short": "5m" if "5m" in slug or "5-minutes" in slug else
+                     ("15m" if "15" in slug else "?"),
             "up_bid": up.get("bestBid"), "up_ask": up.get("bestAsk"),
             "dn_bid": dn.get("bestBid"), "dn_ask": dn.get("bestAsk"),
-            "status": up.get("status"),
         })
-    for r in rows[:40]:
-        s = (f"  id={r['id']:<7} {r['slug']:<46} "
-             f"Up {r['up_bid']}/{r['up_ask']}  Down {r['dn_bid']}/{r['dn_ask']}")
-        print(s)
-    live = [r for r in rows if r["up_ask"] is not None]
-    print(f"\nс активными котировками: {len(live)}")
+    live = [r for r in rows if r["up_ask"] is not None or r["dn_ask"] is not None]
+    for r in rows[:30]:
+        mark = " ←есть котировки" if r in live else ""
+        print(f"  id={r['id']:<9} {r['short']:<4} {r['slug'][:44]:<44} "
+              f"Up {str(r['up_bid']):>5}/{str(r['up_ask']):<5} "
+              f"Down {str(r['dn_bid']):>5}/{str(r['dn_ask']):<5}{mark}")
+    print(f"\nс активными котировками: {len(live)} из {len(rows)}")
     if live:
-        print("для замера стакана: python scripts/predict_probe.py --depth "
+        print(f"замерить стакан: python scripts/predict_probe.py --depth "
               f"{live[0]['id']}")
 
 
