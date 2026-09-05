@@ -49,11 +49,8 @@ def crypto_strategy(
         return val if val > 0 else fallback
 
     if name == "HSS":
-        # Крипта: doji на S/R + ТА. CFD собирает ScalpHA сам, без setup_mode.
         return ScalpHA(rr=rr_for("hss", rr), pullback_bars=pullback, session=sess,
                        vol_mode="min", vol_window=3, entry_mode="market",
-                       setup_mode="sr_doji", ta_filter="full",
-                       require_structure=False, block_after_small_doji=False,
                        **kw)
     if name in ("London S/R", "LondonSR"):
         return LondonSR(london=london, ny=sess or CRYPTO_NY,
@@ -117,8 +114,6 @@ def crypto_playbook(
     if m1:
         pf.add(ScalpHA(rr=rr_for("hss", rr), pullback_bars=pullback, session=session,
                        vol_mode="min", vol_window=3, entry_mode="market",
-                       setup_mode="sr_doji", ta_filter="full",
-                       require_structure=False, block_after_small_doji=False,
                        **kw), "HSS")
         pf.add(LondonSR(london=london, ny=session or CRYPTO_NY,
                         min_rr=rr_for("london_sr", rr), **kw), "London S/R")

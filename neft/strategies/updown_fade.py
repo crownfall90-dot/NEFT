@@ -1,0 +1,177 @@
+"""Mean-reversion для бинарного контракта «BTC вверх/вниз за 5 минут».
+
+ИДЕЯ. Сканирование 62 688 баров (2 месяца, 1m BTCUSDT) показало устойчивую
+асимметрию на горизонте 5 минут:
+
+    квинтиль momentum      доля Up через 5 мин
+    сильный рост (верх)         47.1 – 48.3%
+    сильное падение (низ)       50.7 – 51.4%
+    база по всей выборке        49.11%
+
+То есть после резкого движения цена склонна возвращаться. Стратегия ставит
+ПРОТИВ импульса: сильный рост → покупаем Down, сильное падение → покупаем Up.
+
+ВАЛИДАЦИЯ (скрипты в scripts/updown_*.py):
+  * 5729 сделок за 59 дней, винрейт 52.47%, 95% ДИ 51.17–53.76%
+  * walk-forward (обучение 14 дн → торговля 1 день): 52.59%, 2862 сделки,
+    средняя потеря train→test −0.74 п.п., 26 прибыльных дней из 30
+  * 0 убыточных недель из 9
+  * бутстрэп: доля выборок ниже порога 46.8% — 0.00%
+  * устойчиво к задержке входа: +3 мин даёт 51.6% против 52.3% мгновенно
+  * порог не хрупкий: thr от 2.0 до 4.0 → винрейт 51.1–52.7% плавно
+
+ЭКОНОМИКА (комиссия predict.fun: тейкер 2%×min(p,1−p), −10% по инвайту):
+  * при цене 0.46 порог безубытка 46.83%, перевес +5.64 п.п. (8.5σ)
+  * критическая цена тейкера ≈0.516 — дороже перевес исчезает
+  * мейкером (лимитный post-only ордер) комиссия 0% + ребейт 25%
+
+ГЛАВНОЕ ОГРАНИЧЕНИЕ — ЁМКОСТЬ. Оборот одного 5m рынка ~$41k. При ставке
+$500 проскальзывание задирает цену входа выше критической и перевес умирает.
+Рабочий диапазон ставки ~$100–250. Реальная глубина стакана НЕ ИЗМЕРЕНА —
+это главный непроверенный риск, снимается только замером через API.
+
+ПОЧЕМУ БЕЗ ДОПОЛНИТЕЛЬНЫХ ФИЛЬТРОВ (проверено в scripts/updown_final.py).
+Попытка поднять винрейт фильтрами (объёмный всплеск, фитиль отбоя, край
+диапазона, порог импульса 5.0) давала на подборе 61–64%, но НЕ перенеслась
+на отложенные 30% данных:
+
+    конфиг              подбор → отложенные
+    vol+wick            64.09% → 56.57%   (−7.5 п.п.)
+    vol+edge            63.25% → 50.86%  (−12.4 п.п.)
+    vol only m10        62.24% → 51.69%  (−10.6 п.п.)
+    vol only m15        61.32% → 50.00%  (−11.3 п.п.)
+    базовая (эта)       52.06% → 52.96%   (+0.9 п.п.)
+
+Фильтры сокращают выборку до 100–400 сделок и начинают ловить шум. Часовые
+фильтры не используются намеренно: час 02:00 UTC даёт 62% на 502 barах, но
+механизма за этим нет. Устояла только версия без фильтров — она же прошла
+walk-forward (52.89%, 4025 сделок, 0 убыточных недель из 6).
+
+О «ПРОСАДКЕ ОДНОЙ СДЕЛКИ». У бинарного контракта её не существует: купили
+Up за 0.46 → через 5 минут либо 1.00, либо 0.00. Каждая сделка теряет 0%
+или 100% ставки, промежуточных значений нет — ни стопа, ни частичного
+убытка. Ограничивать просадку можно только на уровне ДЕПОЗИТА, через
+размер ставки. Максимальная серия поражений на истории — 11 подряд.
+
+РЕЖИМ РИСКА (scripts/updown_risk.py, Монте-Карло 2000 прогонов).
+Ставка 0.25% от депозита с реинвестированием: медиана просадки −6.1%,
+худшие 5% случаев −8.8%, максимум за все прогоны −12.9% — укладывается
+в лимит 10–15%. Ставка 0.5% уже даёт −17% в худших 5%, то есть выходит
+за лимит. Защитные механики (дневной стоп, пауза после серии поражений)
+проверены и ОТКЛОНЕНЫ: пауза после 5 поражений режет итог с ×26.6 до ×4.9,
+а просадку улучшает лишь с −16.9% до −15.1%.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from neft.core.indicators import atr, ema
+
+H_DEFAULT = 5
+
+
+class UpDownFade:
+    """Ставка против импульса на фиксированной 5-минутной экспирации."""
+
+    name = "updown_fade"
+
+    def __init__(
+        self,
+        horizon: int = H_DEFAULT,     # баров до экспирации (1m свечи)
+        mom_bars: int = 10,           # окно импульса
+        mom_threshold: float = 3.0,   # порог импульса в долях ATR
+        atr_period: int = 14,
+        cooldown_bars: int = 5,       # не входить, пока идёт прошлый контракт
+        require_bar_pos: bool = False,  # доп. фильтр: где закрылись внутри бара
+        session: tuple[int, int] | None = None,
+        max_mom: float | None = None,   # верхняя отсечка (аномальные всплески)
+    ):
+        self.horizon = horizon
+        self.mom_bars = mom_bars
+        self.mom_threshold = mom_threshold
+        self.atr_period = atr_period
+        self.cooldown_bars = cooldown_bars
+        self.require_bar_pos = require_bar_pos
+        self.session = session
+        self.max_mom = max_mom
+
+        self.skipped_weak = 0
+        self.skipped_extreme = 0
+        self.skipped_pos = 0
+        self.skipped_session = 0
+        self.df: pd.DataFrame | None = None
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        d = df.copy().reset_index(drop=True)
+        d["atr"] = atr(d, self.atr_period)
+        a = d.atr.replace(0, np.nan)
+        d["mom"] = (d.close - d.close.shift(self.mom_bars)) / a
+        d["ema20"] = ema(d.close, 20)
+        rng = (d.high - d.low).replace(0, np.nan)
+        d["bar_pos"] = ((d.close - d.low) / rng).fillna(0.5)
+        self.df = d
+        return d
+
+    def signal_at(self, i: int) -> dict | None:
+        """Сигнал на баре i, или None. Смотрит только в прошлое."""
+        d = self.df
+        if d is None or i < max(self.mom_bars, self.atr_period) + 5:
+            return None
+        r = d.iloc[i]
+
+        if self.session is not None:
+            lo, hi = self.session
+            if not (lo <= r.time.hour < hi):
+                self.skipped_session += 1
+                return None
+
+        v = float(r.mom) if r.mom == r.mom else np.nan
+        if not np.isfinite(v) or abs(v) < self.mom_threshold:
+            self.skipped_weak += 1
+            return None
+        if self.max_mom is not None and abs(v) > self.max_mom:
+            self.skipped_extreme += 1
+            return None
+
+        # Против движения: рост → Down, падение → Up.
+        side = "Down" if v > 0 else "Up"
+
+        if self.require_bar_pos:
+            p = float(r.bar_pos)
+            if side == "Down" and p < 0.6:
+                self.skipped_pos += 1
+                return None
+            if side == "Up" and p > 0.4:
+                self.skipped_pos += 1
+                return None
+
+        return {"i": i, "time": r.time, "side": side,
+                "price": float(r.close), "mom": v}
+
+    def signals(self) -> pd.DataFrame:
+        """Все сигналы по подготовленному df, с учётом cooldown."""
+        d = self.df
+        if d is None:
+            raise RuntimeError("сначала prepare()")
+        rows, last = [], -10**9
+        close = d.close.to_numpy()
+        for i in range(len(d) - self.horizon):
+            if i - last < self.cooldown_bars:
+                continue
+            s = self.signal_at(i)
+            if s is None:
+                continue
+            entry, exit_px = close[i], close[i + self.horizon]
+            if exit_px == entry:
+                outcome = "tie"
+            elif (exit_px > entry) == (s["side"] == "Up"):
+                outcome = "win"
+            else:
+                outcome = "loss"
+            rows.append({**s, "i_exit": i + self.horizon,
+                         "exit_time": d.time.iat[i + self.horizon],
+                         "entry": entry, "exit": exit_px,
+                         "outcome": outcome})
+            last = i
+        return pd.DataFrame(rows)

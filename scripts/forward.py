@@ -185,7 +185,6 @@ class Watcher:
         self.hss = ScalpHA(rr=rr, pullback_bars=pb, session=hss_sess,
                            vol_mode=vol_mode, vol_window=3, entry_mode=entry_mode,
                            require_matching_doji=match_doji,
-                           ta_filter=str(hss_cfg.get("ta_filter") or "off"),
                            risk_pct=args.risk, risk_manager=risk, spec=self.spec)
         self.lsr = LondonSR(london=lon, ny=ny, min_rr=rr,
                             risk_pct=args.risk, risk_manager=risk, spec=self.spec)

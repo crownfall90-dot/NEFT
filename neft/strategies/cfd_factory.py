@@ -150,7 +150,6 @@ def build_cfd_strategy(
             vol_window=3,
             entry_mode=str(st.get("entry_mode") or "market"),
             require_matching_doji=bool(st.get("matching_doji")),
-            ta_filter=str(st.get("ta_filter") or "off"),
             session=session,
             **kw,
         )

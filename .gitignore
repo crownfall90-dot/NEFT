@@ -10,6 +10,7 @@ data/panel_token
 # scripts/*_data.py / crypto_data.py при первом запуске бэктеста.
 data/*.csv
 data/crypto/
+data/updown/
 data/*_cache.json
 data/session_salt
 dashboard/crypto_chart.json
